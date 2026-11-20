@@ -1,0 +1,11 @@
+{
+  "title": "Hub Demo Question",
+  "machineName": "Hub.DemoQuestion",
+  "majorVersion": 1,
+  "minorVersion": 0,
+  "patchVersion": 0,
+  "runnable": 1,
+  "embedTypes": ["div"],
+  "preloadedJs": [{"path": "question.js"}],
+  "preloadedCss": [{"path": "question.css"}]
+}

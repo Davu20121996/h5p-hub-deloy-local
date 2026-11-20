@@ -1,0 +1,4 @@
+[
+  {"name":"question","type":"text","label":"Câu hỏi","default":"Laravel có thể tích hợp H5P?"},
+  {"name":"answer","type":"boolean","label":"Đáp án đúng là Có","default":true}
+]

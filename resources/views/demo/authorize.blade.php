@@ -1,0 +1,1 @@
+<!doctype html><html><head><meta charset="utf-8"><title>LTI Platform launch</title></head><body><form id="launch" method="post" action="{{ route('lti.launch') }}"><input type="hidden" name="state" value="{{ $state }}"><input type="hidden" name="id_token" value="{{ $jwt }}"><button>Open H5P</button></form><script>document.getElementById('launch').submit();</script></body></html>

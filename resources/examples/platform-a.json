@@ -1,0 +1,11 @@
+{
+  "tenant_slug": "don-vi-a",
+  "tenant_name": "Đơn vị A",
+  "name": "Web A",
+  "issuer": "https://web-a.example.com",
+  "client_id": "h5p-hub-client",
+  "authorization_url": "https://web-a.example.com/lti/authorize",
+  "jwks_url": "https://web-a.example.com/lti/jwks",
+  "deployment_id": "deployment-a",
+  "allowed_origins": ["https://web-a.example.com"]
+}

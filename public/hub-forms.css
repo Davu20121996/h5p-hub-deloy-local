@@ -1,0 +1,149 @@
+:root {
+    color-scheme: light;
+    --hub-ink: #19273b;
+    --hub-muted: #52637b;
+    --hub-border: #dce4ef;
+    --hub-field-border: #aab8cb;
+    --hub-surface: #fff;
+    --hub-background: #f4f7fb;
+    --hub-primary: #214fbd;
+    --hub-focus: #2563eb;
+}
+
+.hub-page {
+    margin: 0;
+    background: var(--hub-background);
+    color: var(--hub-ink);
+    font: 15px/1.55 "Segoe UI", system-ui, sans-serif;
+}
+
+.hub-page a { color: var(--hub-primary); }
+.hub-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    background: #182a46;
+    color: white;
+    padding: 14px max(20px, calc((100vw - 1120px) / 2));
+}
+.hub-header a { color: white; font-weight: 700; text-decoration: none; }
+.hub-main { width: min(100%, 1160px); box-sizing: border-box; margin: 26px auto; padding: 0 20px; }
+.hub-main h1 { margin: 0 0 12px; font-size: clamp(1.5rem, 3vw, 2rem); line-height: 1.2; }
+.hub-main h2 { margin: 0 0 12px; font-size: 1.2rem; }
+.hub-main h3 { margin: 20px 0 8px; font-size: 1.05rem; }
+.hub-main p { margin: 0 0 12px; }
+.hub-main .muted { color: var(--hub-muted); font-size: .9rem; }
+.hub-card {
+    min-width: 0;
+    margin-bottom: 18px;
+    padding: clamp(16px, 3vw, 26px);
+    border: 1px solid var(--hub-border);
+    border-radius: 14px;
+    background: var(--hub-surface);
+    box-shadow: 0 2px 6px #182a4608;
+}
+.hub-main :is(.hub-table, pre) { overflow: auto; }
+.hub-table table { width: 100%; min-width: 560px; border-collapse: collapse; font-size: .9rem; }
+.hub-table :is(th, td) { padding: 12px; border-bottom: 1px solid var(--hub-border); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.hub-table th { background: #f1f5fa; font-weight: 650; }
+.hub-table td > details { margin-top: 7px; }
+.hub-main summary { color: #234984; font-weight: 600; cursor: pointer; }
+.hub-inline-panel[open], .hub-table details[open] > .hub-form { min-width: min(235px, 70vw); }
+.hub-table details > :is(.hub-form, .hub-field) { margin-top: 8px; }
+.hub-login { max-width: 420px; margin: clamp(16px, 8vh, 64px) auto; }
+.hub-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.hub-stats strong { display: block; font-size: 1.65rem; }
+.hub-main nav[role="navigation"] { margin-top: 14px; }
+.hub-main nav[role="navigation"] svg { width: 16px; height: 16px; vertical-align: middle; }
+.hub-tabs { padding-bottom: 8px; border-bottom: 1px solid var(--hub-border); }
+.hub-main code { overflow-wrap: anywhere; }
+.hub-main pre { padding: 12px; border-radius: 8px; background: #f1f5fa; }
+.hub-page .row { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+
+.hub-nav { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 20px; }
+.hub-nav a {
+    padding: 8px 12px;
+    border-radius: 8px;
+    color: var(--hub-muted);
+    font-weight: 650;
+    text-decoration: none;
+}
+.hub-nav a:hover, .hub-nav a[aria-current="page"] { background: #e8efff; color: #173f9e; }
+.hub-notice { margin-bottom: 16px; padding: 12px 16px; border: 1px solid #adddbd; border-radius: 9px; background: #ecf9f0; color: #154b2b; }
+.hub-notice--error { border-color: #f3c3bd; background: #fff2f0; color: #941e17; }
+.hub-notice ul { margin: 0; padding-inline-start: 20px; }
+
+.hub-form { display: grid; gap: 14px; }
+.hub-form--grid { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: end; }
+.hub-form--accounts { align-items: start; }
+.hub-form--filter { grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr)); align-items: end; }
+.hub-form--inline { display: flex; flex-wrap: wrap; align-items: end; }
+.hub-form--inline .hub-field { flex: 1 1 240px; }
+.hub-form--inline + .muted { margin-top: 8px; }
+.hub-field { display: grid; gap: 6px; min-width: 0; }
+.hub-field--wide, .hub-actions { grid-column: 1 / -1; }
+.hub-field > label { font-weight: 650; }
+.hub-field small { color: var(--hub-muted); font-size: .83rem; }
+.hub-page :is(.hub-form, .hub-field) :is(input:not([type="hidden"], [type="checkbox"], [type="radio"]), select, textarea) {
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    min-height: 43px;
+    padding: 9px 11px;
+    border: 1px solid var(--hub-field-border);
+    border-radius: 8px;
+    background: var(--hub-surface);
+    color: var(--hub-ink);
+    font: inherit;
+}
+.hub-page .hub-form select { padding-inline-end: 30px; }
+.hub-page .hub-form textarea { resize: vertical; }
+.hub-page :is(.hub-form, .hub-field) input[readonly] { background: #f1f5fa; color: #3d506b; }
+.hub-page .hub-form input[type="file"] { padding: 5px; }
+.hub-page .hub-form input::file-selector-button {
+    margin-inline-end: 10px;
+    padding: 5px 10px;
+    border: 0;
+    border-radius: 5px;
+    background: #e9effa;
+    color: #193b79;
+    font: inherit;
+    cursor: pointer;
+}
+.hub-check { display: flex; align-items: center; gap: 8px; font-weight: 550; cursor: pointer; }
+.hub-check input { width: 17px; height: 17px; margin: 0; accent-color: var(--hub-primary); }
+.hub-page :is(a, button, input, select, textarea, summary):focus-visible { outline: 2px solid var(--hub-focus); outline-offset: 2px; }
+.hub-page .hub-form [aria-invalid="true"] { border-color: #a72820; }
+.hub-field .hub-field-error { color: #941e17; }
+.hub-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.hub-page .hub-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    min-height: 42px;
+    padding: 8px 14px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: var(--hub-primary);
+    color: white;
+    font: inherit;
+    font-weight: 650;
+    text-decoration: none;
+    cursor: pointer;
+}
+.hub-page .hub-button:hover { background: #173d99; }
+.hub-page .hub-button--secondary { border-color: #aab8cb; background: #fff; color: #203b65; }
+.hub-page .hub-button--secondary:hover { background: #eaf0fa; }
+.hub-page .hub-button--small { min-height: 34px; padding: 5px 10px; font-size: .875rem; }
+.hub-page .hub-button:disabled { opacity: .6; cursor: not-allowed; }
+
+@media (max-width: 600px) {
+    .hub-main { padding-inline: 12px; margin-top: 16px; }
+    .hub-header { padding-inline: 12px; }
+    .hub-form--grid, .hub-form--filter { grid-template-columns: minmax(0, 1fr); }
+    .hub-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

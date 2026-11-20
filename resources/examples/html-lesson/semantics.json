@@ -1,0 +1,28 @@
+[
+  {"name": "lessonVideo", "type": "video", "label": "Video bài học"},
+  {
+    "name": "questions",
+    "type": "list",
+    "label": "Các câu hỏi",
+    "min": 5,
+    "max": 5,
+    "field": {
+      "name": "question",
+      "type": "group",
+      "label": "Câu hỏi",
+      "fields": [
+        {"name": "prompt", "label": "Câu hỏi", "type": "text"},
+        {"name": "a", "label": "Đáp án A", "type": "text"},
+        {"name": "b", "label": "Đáp án B", "type": "text"},
+        {"name": "c", "label": "Đáp án C", "type": "text"},
+        {"name": "d", "label": "Đáp án D", "type": "text"},
+        {"name": "correct", "label": "Đáp án đúng", "type": "select", "options": [
+          {"value": "a", "label": "A"},
+          {"value": "b", "label": "B"},
+          {"value": "c", "label": "C"},
+          {"value": "d", "label": "D"}
+        ]}
+      ]
+    }
+  }
+]

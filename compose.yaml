@@ -1,0 +1,92 @@
+name: h5p-hub
+x-app: &app
+  image: h5p-hub-app:local
+  build:
+    context: .
+    dockerfile: docker/php/Dockerfile
+    target: development
+  volumes:
+    # Mount source code từ Windows (chậm nhưng cần để dev live-edit)
+    - .:/var/www/html
+    # vendor và storage dùng named volume (nằm trong Linux VM, nhanh hơn 10-20x)
+    - vendor:/var/www/html/vendor
+    - storage:/var/www/html/storage
+  environment: &environment
+    APP_NAME: H5P Hub
+    APP_ENV: production
+    APP_URL: ${APP_URL:?Set APP_URL in .env}
+    APP_DEBUG: "false"
+    LOG_LEVEL: warning
+    LTI_ALLOW_HTTP: "false"
+    LTI_DEMO_ENABLED: "false"
+    DB_CONNECTION: pgsql
+    DB_HOST: postgres
+    DB_PORT: 5432
+    DB_DATABASE: h5p
+    DB_USERNAME: h5p
+    DB_PASSWORD: ${DB_PASSWORD:-local-development-only}
+    CACHE_STORE: redis
+    SESSION_DRIVER: redis
+    SESSION_SECURE_COOKIE: "true"
+    SESSION_ENCRYPT: "true"
+    SESSION_SAME_SITE: none
+    QUEUE_CONNECTION: database
+    REDIS_HOST: redis
+    REDIS_PORT: 6379
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+services:
+  app:
+    <<: *app
+    networks:
+      - default
+  web:
+    image: nginx:1.28-alpine
+    ports:
+      - "127.0.0.1:8080:80"
+    volumes:
+      - .:/var/www/html:ro
+      - vendor:/var/www/html/vendor:ro
+      - storage:/var/www/html/storage:ro
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      app:
+        condition: service_started
+    restart: on-failure
+  worker:
+    <<: *app
+    command: sh -c "php artisan config:clear && php artisan queue:work --tries=3 --timeout=120"
+  scheduler:
+    <<: *app
+    command: sh -c "php artisan config:clear && php artisan schedule:work"
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: h5p
+      POSTGRES_USER: h5p
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-local-development-only}
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U h5p -d h5p"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  redis:
+    image: redis:7-alpine
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --save "" --appendonly no
+    volumes:
+      - redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+volumes:
+  postgres:
+  redis:
+  vendor:
+  storage:
