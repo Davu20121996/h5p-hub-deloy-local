@@ -12,7 +12,7 @@ Laravel 13 / PHP 8.3, H5P core 1.28, H5P editor 1.25. Một Hub phục vụ nhi�
 - Editor/player H5P thật; tạo/sửa, nháp/xuất bản, nhân bản, nhập/xuất .h5p, xóa bài chưa được sử dụng.
 - Tệp nội dung riêng theo tenant và kiểm tra phiên/quyền khi đọc.
 - Thư viện H5P cài tập trung bằng CLI từ nguồn quản trị tin cậy. Trainer không được cài JavaScript từ gói tải lên.
-- Lưu sự kiện kết quả của bài chính, chống trùng theo event ID trong mỗi launch; chủ bài xem kết quả nội bộ.
+- Không lưu điểm hoặc kết quả học tập trong Hub; Hub không gửi điểm về sổ điểm Client.
 - Demo local cho hai website/tenant, trainer và learner.
 
 **Không triển khai AGS, NRPS, Dynamic Registration.** Không gửi điểm ra website và không khai báo line item trong Deep Linking.
@@ -58,7 +58,7 @@ Thông tin cấp cho website:
 
 Website cấp issuer, client ID, deployment ID, authorization endpoint và JWKS URL. Đăng ký các URL chính xác; allowed_origins là origin đầy đủ, không có wildcard/path. Một registration có thể có nhiều deployment; deployment đã có không được chuyển sang tenant khác.
 
-Lệnh đăng ký hỗ trợ các trường boolean tùy chọn `tenant_active`, `platform_active`, `deployment_active` để khóa/mở. Nếu bỏ qua, trạng thái hiện có được giữ lại. Quản trị hiện dùng CLI; chưa có dashboard quản trị tài khoản riêng.
+Lệnh đăng ký hỗ trợ các trường boolean tùy chọn `tenant_active`, `platform_active`, `deployment_active` để khóa/mở. Nếu bỏ qua, trạng thái hiện có được giữ lại. Quản trị viên hệ thống đăng nhập tại `/admin/login` để quản lý tenant, kết nối LTI và thư viện. Giáo viên và học viên truy cập Hub qua LTI; không có tài khoản đăng nhập riêng trên Hub.
 
 ### Luồng trainer
 
@@ -80,7 +80,7 @@ docker compose exec --user www-data app php artisan h5p:libraries:install /path/
 
 Cài thư viện từ nguồn tin cậy trong thời gian bảo trì; gói thư viện chứa mã chạy trên trình duyệt. Kiểm tra tương thích trước khi cập nhật trên production. MVP không thực hiện nâng cấp nội dung giữa major/minor version và không hỗ trợ H5P Content Hub trực tuyến. Gói import của trainer chỉ lấy nội dung; các thư viện đi kèm không được cài.
 
-Thư viện demo Hub.DemoQuestion là bài mẫu nhỏ trong repository để thử editor/player và kết quả. Cài các loại H5P chính thức cần dùng bằng lệnh trên.
+Thư viện demo Hub.DemoQuestion là bài mẫu nhỏ trong repository để thử editor/player. Cài các loại H5P chính thức cần dùng bằng lệnh trên.
 
 ## Iframe và cookie
 
@@ -95,18 +95,17 @@ State OIDC được gắn với trình duyệt để chống login CSRF. Nếu t
 
 CSP frame-ancestors giới hạn website được nhúng. URL nội dung cần phiên hợp lệ; copy URL player đơn thuần không thay thế launch LTI.
 
-## Kết quả
+## Điểm và kết quả học tập
 
-Kết quả được lưu trong Hub theo launch, danh tính, deployment, resource link và bài H5P. Đây là dữ liệu báo từ trình duyệt H5P, không phải cơ chế chấm thi chống gian lận. Mỗi dòng hiện là một sự kiện kết quả; chưa có chính sách gộp nhiều lượt làm thành điểm chính thức. Tiến trình tiếp tục giữa các phiên chưa được triển khai.
+Hub hiện chỉ cung cấp nội dung H5P và player qua LTI. Hub không lưu kết quả học tập, không tạo điểm chính thức và không đồng bộ điểm về sổ điểm Client. AGS chưa được triển khai.
 
 ## Kiểm thử
 
 ```sh
 docker compose exec app php artisan test --compact
-node --test tests/js/results.test.cjs
 ```
 
-Các test bao phủ JWT/state/nonce/replay, login CSRF, vai trò, tenant, phiên, Deep Linking, import/export, đường dẫn ZIP, tệp riêng và lưu kết quả. JavaScript test kiểm tra sự kiện root/child và báo lỗi lưu.
+Các test bao phủ JWT/state/nonce/replay, login CSRF quản trị, vai trò, tenant, phiên LTI, Deep Linking, import/export, đường dẫn ZIP và tệp riêng.
 
 Các tệp test và khóa test dùng thư mục tạm riêng, không dùng kho nội dung thật.
 
@@ -122,7 +121,7 @@ Các tệp test và khóa test dùng thư mục tạm riêng, không dùng kho n
 - Demo và HTTP LTI bị tắt ở production.
 - Không public cổng database/PHP-FPM. Dockhand chỉ dành cho quản trị.
 
-Lưu backup database **cùng** toàn bộ storage (nội dung, thư viện, khóa LTI), và giữ APP_KEY trong kho bí mật. Scheduler xóa login hết hạn và launch không có kết quả sau thời gian đệm; launch có kết quả được giữ lại. Chưa có chính sách xóa dữ liệu người học tự động.
+Lưu backup database **cùng** toàn bộ storage (nội dung, thư viện, khóa LTI), và giữ APP_KEY trong kho bí mật. Scheduler xóa login hết hạn và launch hết hạn sau thời gian đệm. Chưa có chính sách xóa dữ liệu thành viên tenant tự động.
 
 Thiết lập domain/TLS, sao lưu ngoài máy chủ và kết nối website thật theo môi trường triển khai.
 

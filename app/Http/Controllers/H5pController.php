@@ -7,7 +7,6 @@ use App\Models\H5pContent;
 use App\Models\LtiLaunch;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Http\Response;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
 use Illuminate\View\View;
@@ -159,11 +158,4 @@ class H5pController extends Controller
         ]);
     }
 
-    public function result(Request $request, LtiLaunch $launch, string $uuid): Response
-    {
-        $this->authorizeRead($launch, $uuid);
-        abort_unless(! $launch->can_author && $launch->message_type === 'LtiResourceLinkRequest', 403);
-
-        return response()->noContent();
-    }
 }

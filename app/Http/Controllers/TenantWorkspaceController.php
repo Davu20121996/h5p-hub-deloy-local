@@ -3,22 +3,17 @@
 namespace App\Http\Controllers;
 
 use App\Lti\KeyStore;
-use App\Models\H5pLibrary;
 use App\Models\LtiIdentity;
 use App\Models\LtiLaunch;
-use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\View\View;
 
 class TenantWorkspaceController extends Controller
 {
-    public function index(LtiLaunch $launch, KeyStore $keys): View|RedirectResponse
+    public function index(LtiLaunch $launch, KeyStore $keys): View
     {
         abort_unless($launch->canManageTenant(), 403);
-        if ($launch->message_type === 'LocalWorkspace') {
-            return redirect()->route('account.index');
-        }
         $members = DB::table('tenant_identity')->join('lti_identities', 'lti_identities.id', '=', 'tenant_identity.lti_identity_id')
             ->where('tenant_id', $launch->deployment->tenant_id)
             ->select('tenant_identity.*', 'lti_identities.name', 'lti_identities.subject', 'lti_identities.email')
@@ -26,7 +21,6 @@ class TenantWorkspaceController extends Controller
 
         return view('workspace.tenant', [
             'launch' => $launch, 'members' => $members, 'publicKey' => $keys->publicKey(),
-            'libraries' => H5pLibrary::orderBy('machine_name')->get(),
         ]);
     }
 
@@ -41,10 +35,5 @@ class TenantWorkspaceController extends Controller
         $membership->update(['local_role' => $data['local_role']]);
 
         return back()->with('status', 'Đã cập nhật quyền giáo viên.');
-    }
-
-    public function install(LtiLaunch $launch): RedirectResponse
-    {
-        abort(403, 'Chỉ admin hệ thống được cài thư viện H5P dùng chung.');
     }
 }

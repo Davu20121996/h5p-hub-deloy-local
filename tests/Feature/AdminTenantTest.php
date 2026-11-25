@@ -3,7 +3,6 @@
 namespace Tests\Feature;
 
 use App\Lti\KeyStore;
-use App\Lti\PublishScore;
 use App\Models\H5pContent;
 use App\Models\H5pLibrary;
 use App\Models\LtiDeployment;
@@ -52,21 +51,6 @@ class AdminTenantTest extends TestCase
             'deployment_id' => 'school-deployment', 'allowed_origins' => "https://school.example.com\nhttps://portal.example.com", 'platform_active' => '1', 'active' => '1'];
     }
 
-    public function test_ags_token_url_is_saved_per_lms_and_rejects_untrusted_origins(): void
-    {
-        $this->loginAdmin();
-        $tenant = Tenant::factory()->create();
-        $data = $this->connectionData() + ['ags_token_url' => 'https://school.example.com/lti/token'];
-        $this->post(route('admin.tenants.connections.store', $tenant), $data)->assertSessionHasNoErrors();
-        $deployment = LtiDeployment::with('platform')->sole();
-        $this->assertSame($data['ags_token_url'], PublishScore::tokenUrl($deployment->platform));
-        $this->get(route('admin.tenants.show', [$tenant, 'tab' => 'connections']))->assertOk()->assertSee('AGS Token URL')->assertSee($data['ags_token_url']);
-        $this->put(route('admin.tenants.connections.update', [$tenant, $deployment]), array_replace($data, ['ags_token_url' => 'https://foreign.example/token']))->assertSessionHasErrors('ags_token_url');
-        $this->assertSame($data['ags_token_url'], $deployment->platform->fresh()->ags_token_url);
-        $this->put(route('admin.tenants.connections.update', [$tenant, $deployment]), array_replace($data, ['ags_token_url' => '']))->assertSessionHasNoErrors();
-        $this->assertNull(PublishScore::tokenUrl($deployment->platform->fresh()));
-    }
-
     public function test_admin_forms_reject_markup_and_search_treats_sql_as_literal_text(): void
     {
         $this->loginAdmin();
@@ -85,7 +69,7 @@ class AdminTenantTest extends TestCase
         config(['lti.key_directory' => $this->root.'/keys']);
         $tenant = Tenant::factory()->create();
         $url = route('admin.tenants.show', [$tenant, 'tab' => 'connections']);
-        $this->post(route('admin.keys.generate'))->assertRedirect(route('account.login'));
+        $this->post(route('admin.keys.generate'))->assertRedirect(route('admin.login'));
         $this->actingAs(User::factory()->create())->post(route('admin.keys.generate'))->assertForbidden();
         $this->assertNull(app(KeyStore::class)->publicKey());
         $this->loginAdmin();
@@ -243,8 +227,8 @@ class AdminTenantTest extends TestCase
     {
         $tenant = Tenant::factory()->create();
         $content = H5pContent::factory()->create(['tenant_id' => $tenant->id]);
-        $this->get(route('admin.tenants.index'))->assertRedirect(route('account.login'));
-        $this->post(route('admin.tenants.store'), [])->assertRedirect(route('account.login'));
+        $this->get(route('admin.tenants.index'))->assertRedirect(route('admin.login'));
+        $this->post(route('admin.tenants.store'), [])->assertRedirect(route('admin.login'));
         $this->actingAs(User::factory()->create());
         $this->get(route('admin.tenants.show', $tenant))->assertForbidden();
         $this->post(route('admin.tenants.connections.store', $tenant), $this->connectionData())->assertForbidden();

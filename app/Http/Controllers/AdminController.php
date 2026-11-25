@@ -11,14 +11,44 @@ use App\Models\Tenant;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\View\View;
 
 class AdminController extends Controller
 {
-    public function login(): RedirectResponse
+    public function login(): View|RedirectResponse
     {
-        return redirect()->route('account.login');
+        if (Auth::check() && Auth::user()->is_admin) {
+            return redirect()->route('admin.index');
+        }
+
+        return view('admin.login');
+    }
+
+    public function authenticate(Request $request): RedirectResponse
+    {
+        $data = $request->validate([
+            'username' => ['required', 'string', 'max:100', 'regex:/\A[A-Za-z0-9_.@+\-]+\z/'],
+            'password' => 'required|string|max:255',
+        ]);
+
+        if (! Auth::attempt($data + ['is_admin' => true, 'active' => true])) {
+            return back()->withErrors(['username' => 'Tài khoản hoặc mật khẩu không đúng.'])->withInput($request->only('username'));
+        }
+
+        $request->session()->regenerate();
+
+        return redirect()->route('admin.index');
+    }
+
+    public function logout(Request $request): RedirectResponse
+    {
+        Auth::logout();
+        $request->session()->invalidate();
+        $request->session()->regenerateToken();
+
+        return redirect()->route('admin.login');
     }
 
     public function index(): View

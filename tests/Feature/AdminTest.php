@@ -22,22 +22,21 @@ class AdminTest extends TestCase
 
     public function test_guests_cannot_access_admin_actions(): void
     {
-        $this->get('/admin')->assertRedirect('/login');
-        $this->post('/admin/registrations')->assertRedirect('/login');
-        $this->post('/admin/libraries')->assertRedirect('/login');
-        $this->get('/admin/login')->assertRedirect('/login');
-        $this->get('/login')->assertOk()->assertSee('Tên đăng nhập')->assertDontSee('Đăng nhập admin hệ thống');
+        $this->get('/admin')->assertRedirect('/admin/login');
+        $this->post('/admin/registrations')->assertRedirect('/admin/login');
+        $this->post('/admin/libraries')->assertRedirect('/admin/login');
+        $this->get('/admin/login')->assertOk()->assertSee('Đăng nhập quản trị');
     }
 
     public function test_admin_can_login_view_dashboard_and_logout(): void
     {
         $admin = $this->administrator();
-        $this->post('/login', ['username' => 'administrator', 'password' => 'secure-password-123'])->assertRedirect('/admin');
+        $this->post('/admin/login', ['username' => 'administrator', 'password' => 'secure-password-123'])->assertRedirect('/admin');
         $this->assertAuthenticatedAs($admin);
         $this->get('/admin')->assertOk()->assertSee('Kết nối LTI')->assertSee('Thư viện H5P');
-        $this->post('/admin/logout')->assertRedirect('/login');
+        $this->post('/admin/logout')->assertRedirect('/admin/login');
         $this->assertGuest();
-        $this->get('/admin')->assertRedirect('/login');
+        $this->get('/admin')->assertRedirect('/admin/login');
     }
 
     public function test_invalid_password_and_non_admin_are_rejected(): void
@@ -84,7 +83,7 @@ class AdminTest extends TestCase
     {
         $this->artisan('admin:create', ['username' => 'operator'])
             ->expectsQuestion('Password (at least 12 characters)', 'secure-password-123')
-            ->expectsOutput('Administrator created. Login at /login.')
+            ->expectsOutput('Administrator created. Login at /admin/login.')
             ->assertSuccessful();
         $admin = User::where('username', 'operator')->firstOrFail();
         $this->assertTrue($admin->is_admin);

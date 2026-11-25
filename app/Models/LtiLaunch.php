@@ -34,10 +34,6 @@ class LtiLaunch extends Model
 
     public function localRole(): ?string
     {
-        if ($this->message_type === 'LocalWorkspace') {
-            return User::where('lti_identity_id', $this->lti_identity_id)->where('tenant_id', $this->deployment->tenant_id)->value('role');
-        }
-
         return DB::table('tenant_identity')->where('tenant_id', $this->deployment->tenant_id)
             ->where('lti_identity_id', $this->lti_identity_id)->value('local_role');
     }

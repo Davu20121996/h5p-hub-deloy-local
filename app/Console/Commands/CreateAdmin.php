@@ -28,7 +28,7 @@ class CreateAdmin extends Command
         $user->password = $data['password'];
         $user->is_admin = true;
         $user->save();
-        $this->info('Administrator created. Login at /login.');
+        $this->info('Administrator created. Login at /admin/login.');
 
         return self::SUCCESS;
     }

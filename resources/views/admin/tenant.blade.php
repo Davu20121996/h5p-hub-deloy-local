@@ -1,21 +1,13 @@
 @extends('admin.layout')
 @section('content')
 <h1>{{ $tenant->name }}</h1><p>Mã: {{ $tenant->slug }} · {{ $tenant->active ? 'Hoạt động' : 'Đã khóa' }} · Tạo ngày {{ $tenant->created_at->format('d/m/Y H:i') }}</p>
-<nav class="hub-nav hub-tabs" aria-label="Đơn vị">@foreach(['profile'=>'Hồ sơ', 'connections'=>'Kết nối LTI', 'accounts'=>'Tài khoản tenant-admin', 'users'=>'Người dùng LMS', 'contents'=>'Bài H5P'] as $key=>$label)<a href="{{ route('admin.tenants.show', [$tenant, 'tab'=>$key]) }}" @if(request('tab', 'profile') === $key) aria-current="page" @endif>{{ $label }}</a>@endforeach</nav>
+<nav class="hub-nav hub-tabs" aria-label="Đơn vị">@foreach(['profile'=>'Hồ sơ', 'connections'=>'Kết nối LTI', 'users'=>'Người dùng LMS', 'contents'=>'Bài H5P'] as $key=>$label)<a href="{{ route('admin.tenants.show', [$tenant, 'tab'=>$key]) }}" @if(request('tab', 'profile') === $key) aria-current="page" @endif>{{ $label }}</a>@endforeach</nav>
 @if(request('tab', 'profile') === 'profile')
 <section class="hub-card"><h2>Hồ sơ đơn vị</h2>@include('admin.tenant-fields')</section>
 @elseif(request('tab') === 'connections')
-<section class="hub-card"><h2>Thông tin cấu hình trên LMS</h2><p>Sau khi lưu kết nối, <a href="{{ route('admin.tenants.show', [$tenant, 'tab' => 'accounts']) }}">cấp tài khoản tenant-admin</a> để người phụ trách đơn vị tạo tài khoản giáo viên.</p><p>Login URL: <code>{{ route('lti.login') }}</code></p><p>Launch / Redirect / Deep Linking: <code>{{ route('lti.launch') }}</code></p><p>Public JWKS: <code>{{ route('lti.jwks') }}</code></p>@include('workspace.public-key', ['publicKey' => app(\App\Lti\KeyStore::class)->publicKey()])</section>
+<section class="hub-card"><h2>Thông tin cấu hình trên LMS</h2><p>Người dùng đăng nhập vào HUB qua LTI. Vai trò tenant-admin được gán trong tab “Người dùng LMS”.</p><p>Login URL: <code>{{ route('lti.login') }}</code></p><p>Launch / Redirect / Deep Linking: <code>{{ route('lti.launch') }}</code></p><p>Public JWKS: <code>{{ route('lti.jwks') }}</code></p>@include('workspace.public-key', ['publicKey' => app(\App\Lti\KeyStore::class)->publicKey()])</section>
 @foreach($deployments as $deployment)<section class="hub-card"><h2>{{ $deployment->platform->name }} · {{ $deployment->deployment_id }}</h2>@include('admin.connection-form', ['deployment'=>$deployment])</section>@endforeach
 <section class="hub-card"><h2>Thêm kết nối LTI</h2>@include('admin.connection-form', ['deployment'=>null])</section>
-@elseif(request('tab') === 'accounts')
-<section class="hub-card"><h2>Cấp tài khoản tenant-admin</h2><p>Admin hệ thống tạo kết nối và cấp tenant-admin. Tenant-admin đăng nhập để cấp tài khoản giáo viên.</p>
-@php($accountDeployments = $deployments->filter(fn ($deployment) => $deployment->active && $deployment->platform->active))
-@if($tenant->active && $accountDeployments->isNotEmpty())
-@include('admin.account-form', ['accountStoreUrl' => route('admin.tenants.accounts.store', $tenant), 'accountSubmitLabel' => 'Cấp tài khoản tenant-admin'])
-@else<p>Cần <a href="{{ route('admin.tenants.show', [$tenant, 'tab' => 'connections']) }}">tạo kết nối LTI</a> đang hoạt động trước khi cấp tài khoản.</p>@endif
-</section>
-<section class="hub-card"><h2>Tài khoản tenant-admin</h2>@include('admin.account-list')</section>
 @elseif(request('tab') === 'users')
 <section class="hub-card">
     <h2>Thêm người dùng và cấp quyền từ LMS</h2>

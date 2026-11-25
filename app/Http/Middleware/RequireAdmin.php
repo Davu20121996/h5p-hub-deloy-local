@@ -16,7 +16,7 @@ class RequireAdmin
     public function handle(Request $request, Closure $next): Response
     {
         if (! $request->user()) {
-            return redirect()->route('account.login');
+            return redirect()->route('admin.login');
         }
         abort_unless($request->user()->is_admin, 403);
 

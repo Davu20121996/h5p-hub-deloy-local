@@ -58,12 +58,6 @@ class LaunchService
             ->where('tenant_id', $deployment->tenant_id)->where('lti_platform_id', $platform->id)
             ->where('subject', $claims['sub'])->value('local_role');
         $canAuthor = $localRole === null ? Claims::canAuthor($roles) : in_array($localRole, ['teacher', 'tenant-admin'], true);
-        $ags = $claims[PublishScore::CLAIM] ?? null;
-        $lineitem = is_array($ags) ? ($ags['lineitem'] ?? null) : null;
-        $scopes = is_array($ags) ? ($ags['scope'] ?? null) : null;
-        $agsLineitemUrl = $type === 'LtiResourceLinkRequest' && ! $canAuthor && is_array($scopes)
-            && in_array(PublishScore::SCOPE, $scopes, true) && PublishScore::trustedUrl($lineitem, $platform)
-            ? $lineitem : null;
         $settings = null;
         $resourceId = null;
         $contentUuid = null;
@@ -92,7 +86,7 @@ class LaunchService
             abort_unless($contentUuid === null || (is_string($contentUuid) && Str::isUuid($contentUuid)), 400, 'Invalid content ID.');
         }
 
-        return DB::transaction(function () use ($login, $platform, $deployment, $claims, $roles, $type, $canAuthor, $contextId, $resourceId, $contentUuid, $settings, $agsLineitemUrl) {
+        return DB::transaction(function () use ($login, $platform, $deployment, $claims, $roles, $type, $canAuthor, $contextId, $resourceId, $contentUuid, $settings) {
             $consumed = LtiLogin::whereKey($login->id)->whereNull('consumed_at')->where('expires_at', '>', now())->update(['consumed_at' => now()]);
             abort_unless($consumed === 1, 401, 'Login has already been used.');
             $identity = LtiIdentity::updateOrCreate(['lti_platform_id' => $platform->id, 'subject' => $claims['sub']], [
@@ -126,7 +120,6 @@ class LaunchService
                 'lti_identity_id' => $identity->id, 'message_type' => $type, 'roles' => $roles,
                 'can_author' => $canAuthor, 'context_id' => $contextId, 'resource_link_id' => $resourceId,
                 'content_uuid' => $contentUuid, 'deep_linking_settings' => $settings,
-                'ags_lineitem_url' => $agsLineitemUrl,
                 'expires_at' => now()->addSeconds(config('lti.launch_lifetime')),
             ]);
         });

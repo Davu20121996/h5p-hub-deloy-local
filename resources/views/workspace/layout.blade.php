@@ -12,9 +12,6 @@
 <header class="hub-header">
     <strong>H5P Hub · {{ $launch->deployment->tenant->name }}</strong>
     <span>{{ $launch->identity->name ?? $launch->identity->subject }} · {{ $launch->canManageTenant() ? 'Tenant-admin' : ($launch->can_author ? 'Giảng viên' : 'Học viên') }}</span>
-@if($launch->message_type === 'LocalWorkspace')
-<form method="post" action="{{ route('account.logout') }}">@csrf<button class="hub-button hub-button--secondary">Đăng xuất</button></form>
-@endif
 </header>
 <main class="hub-main">
     @if($launch->can_author)<nav class="hub-nav"><a href="{{ route('workspace.index', $launch) }}">Kho bài H5P</a>@if($launch->canManageTenant())<a href="{{ route('workspace.tenant', $launch) }}">Quản trị đơn vị</a>@endif</nav>@endif

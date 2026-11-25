@@ -3,7 +3,6 @@
 namespace App\Http\Controllers;
 
 use App\H5p\Runtime;
-use App\Models\H5pAttempt;
 use App\Models\H5pContent;
 use App\Models\LtiLaunch;
 use App\Models\LtiResourceLink;
@@ -126,14 +125,6 @@ class WorkspaceController extends Controller
         return response()->download((new Runtime($launch))->export($content), $content->uuid.'.h5p')->deleteFileAfterSend(true);
     }
 
-    public function results(LtiLaunch $launch, string $uuid): RedirectResponse
-    {
-        $content = $launch->content($uuid);
-        $launch->authorizeEdit($content);
-
-        return redirect()->route('workspace.index', $launch);
-    }
-
     public function duplicate(LtiLaunch $launch, string $uuid): RedirectResponse
     {
         abort_unless($launch->can_author, 403);
@@ -155,8 +146,7 @@ class WorkspaceController extends Controller
     {
         $content = $launch->content($uuid);
         $launch->authorizeEdit($content);
-        abort_if(LtiResourceLink::where('h5p_content_id', $content->id)->exists()
-            || H5pAttempt::where('h5p_content_id', $content->id)->exists(), 409, 'Bài đã được sử dụng. Chuyển về bản nháp để ngừng xuất bản.');
+        abort_if(LtiResourceLink::where('h5p_content_id', $content->id)->exists(), 409, 'Bài đã được sử dụng. Chuyển về bản nháp để ngừng xuất bản.');
         (new Runtime($launch))->core->fs->deleteContent(['id' => $content->id]);
         $content->delete();
 

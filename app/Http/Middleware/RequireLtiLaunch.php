@@ -15,13 +15,6 @@ class RequireLtiLaunch
         $launch = $request->route('launch');
         abort_unless($launch instanceof LtiLaunch && $request->session()->get('lti_launches.'.$launch->id), 401,
             'Launch session unavailable. Reopen this activity from your website. If embedded cookies are blocked, open it in a new window.');
-        if ($launch->message_type === 'LocalWorkspace') {
-            $user = $request->user();
-            abort_unless($user && $user->canAccessWorkspace()
-                && $user->matchesAccountSession($request->session()->get('account_password'))
-                && $user->lti_identity_id === $launch->lti_identity_id
-                && $user->lti_deployment_id === $launch->lti_deployment_id, 403, 'Tài khoản không có quyền truy cập phiên làm việc này.');
-        }
         $deployment = $launch->deployment;
         abort_unless($launch->expires_at->isFuture() && $deployment->active
             && $deployment->tenant->active && $deployment->platform->active, 403, 'Launch session expired or disabled.');

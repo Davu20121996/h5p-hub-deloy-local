@@ -4,7 +4,6 @@ namespace App\Http\Controllers;
 
 use App\H5p\Runtime;
 use App\Lti\Claims;
-use App\Lti\PublishScore;
 use App\Models\H5pContent;
 use App\Models\H5pLibrary;
 use App\Models\LtiDeployment;
@@ -12,7 +11,6 @@ use App\Models\LtiIdentity;
 use App\Models\LtiLaunch;
 use App\Models\LtiPlatform;
 use App\Models\Tenant;
-use App\Models\User;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -68,7 +66,7 @@ class AdminTenantController extends Controller
 
     public function show(Request $request, Tenant $tenant): View
     {
-        $request->validate(['q' => 'nullable|string|max:255', 'role' => 'nullable|string|max:255', 'status' => 'nullable|in:draft,published,hidden', 'library' => 'nullable|integer', 'user' => 'nullable|integer', 'tab' => 'nullable|in:profile,connections,accounts,users,contents']);
+        $request->validate(['q' => 'nullable|string|max:255', 'role' => 'nullable|string|max:255', 'status' => 'nullable|in:draft,published,hidden', 'library' => 'nullable|integer', 'user' => 'nullable|integer', 'tab' => 'nullable|in:profile,connections,users,contents']);
         $deployments = LtiDeployment::with('platform')->where('tenant_id', $tenant->id)->get();
         $members = DB::table('tenant_identity')->join('lti_identities', 'lti_identities.id', '=', 'tenant_identity.lti_identity_id')
             ->join('lti_platforms', 'lti_platforms.id', '=', 'lti_identities.lti_platform_id')->where('tenant_id', $tenant->id)
@@ -92,7 +90,7 @@ class AdminTenantController extends Controller
         });
         $roleOptions = DB::table('tenant_identity')->where('tenant_id', $tenant->id)->pluck('roles')->flatMap(fn ($roles) => json_decode($roles, true) ?? [])->unique()->sort();
 
-        return view('admin.tenant', compact('tenant', 'deployments', 'members', 'contents', 'authors', 'sizes', 'roleOptions') + ['libraries' => H5pLibrary::orderBy('machine_name')->get(), 'accounts' => User::where('tenant_id', $tenant->id)->where('role', 'tenant-admin')->orderBy('name')->get()]);
+        return view('admin.tenant', compact('tenant', 'deployments', 'members', 'contents', 'authors', 'sizes', 'roleOptions') + ['libraries' => H5pLibrary::orderBy('machine_name')->get()]);
     }
 
     public function connection(Request $request, Tenant $tenant, ?LtiDeployment $deployment = null): RedirectResponse
@@ -103,7 +101,6 @@ class AdminTenantController extends Controller
         $data = $request->validate([
             'name' => $this->plainTextRules(), 'issuer' => 'required|url|max:512', 'client_id' => $this->plainTextRules(),
             'authorization_url' => 'required|url|max:2048', 'jwks_url' => 'required|url|max:2048',
-            'ags_token_url' => 'nullable|url|max:2048',
             'deployment_id' => $this->plainTextRules(), 'allowed_origins' => 'required|string|max:10000',
             'platform_active' => 'required|boolean', 'active' => 'required|boolean',
         ]);
@@ -111,9 +108,6 @@ class AdminTenantController extends Controller
             if (! Claims::validUrl($data[$key])) {
                 throw ValidationException::withMessages([$key => 'URL phải dùng HTTPS; HTTP chỉ dùng khi bật LTI_ALLOW_HTTP.']);
             }
-        }
-        if (! empty($data['ags_token_url']) && ! PublishScore::trustedUrl($data['ags_token_url'], new LtiPlatform(['issuer' => $data['issuer']]))) {
-            throw ValidationException::withMessages(['ags_token_url' => 'AGS Token URL phải dùng HTTPS và cùng origin với Issuer của LMS.']);
         }
         $origins = array_values(array_unique(array_filter(array_map('trim', preg_split('/\R/', $data['allowed_origins'])))));
         foreach ($origins as $origin) {
@@ -134,9 +128,6 @@ class AdminTenantController extends Controller
             $existing = LtiDeployment::where('lti_platform_id', $platform->id)->where('deployment_id', $data['deployment_id'])->first();
             if ($existing && $existing->tenant_id !== $tenant->id) {
                 throw ValidationException::withMessages(['deployment_id' => 'Deployment đã thuộc đơn vị khác.']);
-            }
-            if (array_key_exists('ags_token_url', $data)) {
-                $platform->ags_token_url = $data['ags_token_url'];
             }
             $platform->update(['name' => $data['name'], 'authorization_url' => $data['authorization_url'], 'jwks_url' => $data['jwks_url'], 'allowed_origins' => $origins, 'active' => $data['platform_active']]);
             LtiDeployment::updateOrCreate(['lti_platform_id' => $platform->id, 'deployment_id' => $data['deployment_id']], ['tenant_id' => $tenant->id, 'active' => $data['active']]);

@@ -6,7 +6,6 @@ use App\H5p\LibraryInstaller;
 use App\H5p\Runtime;
 use App\Lti\Claims;
 use App\Lti\KeyStore;
-use App\Lti\PublishScore;
 use App\Models\H5pContent;
 use App\Models\H5pLibrary;
 use App\Models\LtiDeployment;
@@ -21,7 +20,6 @@ use Firebase\JWT\JWT;
 use Firebase\JWT\Key;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
-use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
@@ -141,7 +139,6 @@ class LtiIntegrationTest extends TestCase
         $this->patch(route('workspace.tenant.role', [$launch, $foreign]), ['local_role' => 'teacher'])->assertNotFound();
         $membership->update(['local_role' => 'teacher']);
         $this->get(route('workspace.tenant', $launch))->assertForbidden();
-        $this->post(route('workspace.tenant.install', $launch))->assertForbidden();
     }
 
     public function test_local_permissions_survive_lms_login_and_revocation_applies_to_existing_sessions(): void
@@ -155,7 +152,6 @@ class LtiIntegrationTest extends TestCase
         $membership->update(['local_role' => 'learner']);
         $this->get(route('content.create', $launch))->assertForbidden();
         $this->post(route('content.import', $launch))->assertForbidden();
-        $this->post(route('workspace.tenant.install', $launch))->assertForbidden();
         $this->launch()->assertForbidden();
         $membership->update(['local_role' => null]);
         $this->get(route('workspace.index', $launch))->assertOk();
@@ -174,14 +170,12 @@ class LtiIntegrationTest extends TestCase
         $zip->addFromString('h5p.json', json_encode(['title' => 'Teacher import', 'mainLibrary' => 'Hub.DemoQuestion', 'preloadedDependencies' => [['machineName' => 'Hub.DemoQuestion', 'majorVersion' => 1, 'minorVersion' => 0]]]));
         $zip->addFromString('content/content.json', json_encode(['question' => 'Imported?', 'answer' => true]));
         $zip->close();
-        $this->post(route('workspace.tenant.install', $launch), ['package' => new UploadedFile($path, 'library.h5p', test: true)])->assertForbidden();
         $this->assertDatabaseCount('h5p_libraries', 0);
         $admin = User::factory()->create();
         $admin->forceFill(['is_admin' => true])->save();
         $this->actingAs($admin)->post(route('admin.install'), ['package' => new UploadedFile($path, 'library.h5p', test: true)])->assertSessionHasNoErrors()->assertRedirect();
         $this->assertDatabaseCount('h5p_libraries', 1);
         DB::table('tenant_identity')->where('lti_identity_id', $launch->lti_identity_id)->update(['local_role' => 'teacher']);
-        $this->post(route('workspace.tenant.install', $launch), ['package' => new UploadedFile($path, 'library.h5p', test: true)])->assertForbidden();
         $this->post(route('content.import', $launch), ['package' => new UploadedFile($path, 'lesson.h5p', test: true)])->assertSessionHasNoErrors()->assertRedirect();
         $this->assertDatabaseHas('h5p_contents', ['tenant_id' => $this->deployment->tenant_id, 'lti_identity_id' => $launch->lti_identity_id, 'title' => 'Teacher import']);
         $this->post(route('content.import', $launch), ['package' => UploadedFile::fake()->createWithContent('bad.h5p', 'broken')])->assertSessionHasErrors('package');
@@ -364,37 +358,9 @@ class LtiIntegrationTest extends TestCase
         ])->assertRedirect();
         $launch = LtiLaunch::firstOrFail();
         $this->get(route('content.create', ['launch' => $launch->id]))->assertForbidden();
-        $payload = ['event_id' => (string) Str::uuid(), 'score' => 1, 'max_score' => 1, 'completed' => true, 'result' => ['completion' => true]];
-        for ($i = 0; $i < 2; $i++) {
-            $this->postJson(route('content.results', ['launch' => $launch->id, 'uuid' => $content->uuid]), $payload)->assertNoContent();
-        }
-        $this->assertDatabaseCount('h5p_attempts', 0);
         $this->assertDatabaseHas('lti_resource_links', ['resource_link_id' => 'lesson-1', 'h5p_content_id' => $content->id]);
         $other = $this->content(null, ['h5p_library_id' => $content->h5p_library_id]);
         $this->get(route('content.play', ['launch' => $launch->id, 'uuid' => $other->uuid]))->assertForbidden();
-    }
-
-    public function test_completed_result_does_not_save_attempt_or_dispatch_score(): void
-    {
-        Bus::fake([PublishScore::class]);
-        $lineitem = $this->platform->issuer.'/lineitems/42';
-        $content = $this->content();
-        $this->launch([
-            Claims::PREFIX.'message_type' => 'LtiResourceLinkRequest',
-            Claims::PREFIX.'roles' => ['http://purl.imsglobal.org/vocab/lis/v2/membership#Learner'],
-            Claims::PREFIX.'resource_link' => ['id' => 'lesson-ags'],
-            Claims::PREFIX.'custom' => ['content_id' => $content->uuid],
-            PublishScore::CLAIM => ['lineitem' => $lineitem, 'scope' => [PublishScore::SCOPE]],
-        ])->assertRedirect();
-        $launch = LtiLaunch::sole();
-        $endpoint = route('content.results', ['launch' => $launch->id, 'uuid' => $content->uuid]);
-        $payload = ['event_id' => (string) Str::uuid(), 'score' => 0, 'max_score' => 5, 'completed' => true, 'result' => ['completion' => true]];
-        $this->postJson($endpoint, $payload)->assertNoContent();
-        $this->postJson($endpoint, $payload)->assertNoContent();
-        $this->assertDatabaseCount('h5p_attempts', 0);
-        Bus::assertNotDispatched(PublishScore::class);
-        File::copyDirectory(resource_path('examples/demo-library'), Runtime::libraryPath().'/Hub.DemoQuestion-1.0');
-        $this->get(route('content.play', [$launch, $content->uuid]))->assertOk()->assertDontSee('hub-results.js')->assertDontSee('H5PHubResults');
     }
 
     public function test_missing_browser_session_cannot_open_launch(): void
@@ -404,12 +370,11 @@ class LtiIntegrationTest extends TestCase
         $this->get(route('workspace.index', ['launch' => $launch->id]))->assertUnauthorized();
     }
 
-    public function test_trainer_cannot_edit_another_authors_content_or_record_preview_results(): void
+    public function test_trainer_cannot_edit_another_authors_content(): void
     {
         $launch = $this->activeLaunch();
         $content = $this->content();
         $this->get(route('content.edit', ['launch' => $launch->id, 'uuid' => $content->uuid]))->assertForbidden();
-        $this->postJson(route('content.results', ['launch' => $launch->id, 'uuid' => $content->uuid]), [])->assertForbidden();
     }
 
     public function test_editor_player_and_semantics_endpoints_render(): void
