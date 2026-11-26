@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\H5p\Runtime;
 use App\Lti\Claims;
+use App\Lti\KeyStore;
+use App\Lti\ScoreService;
 use App\Models\H5pContent;
 use App\Models\H5pLibrary;
 use App\Models\LtiDeployment;
@@ -11,10 +13,15 @@ use App\Models\LtiIdentity;
 use App\Models\LtiLaunch;
 use App\Models\LtiPlatform;
 use App\Models\Tenant;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
@@ -53,6 +60,72 @@ class AdminTenantController extends Controller
         return back()->with('status', 'Đã cập nhật đơn vị.');
     }
 
+    public function clientCredentials(Request $request, Tenant $tenant, KeyStore $keys): Response
+    {
+        abort_unless($tenant->active, 403);
+        $data = $request->validate([
+            'manager_name' => $this->plainTextRules(),
+            'manager_email' => 'required|email|max:255',
+            'deployment' => 'required|integer',
+        ]);
+
+        $deployment = LtiDeployment::with('platform')->where('tenant_id', $tenant->id)
+            ->where('active', true)->find($data['deployment']);
+        $clientUrl = (string) config('lti.managed_client_url');
+        $secret = (string) config('lti.provisioning_secret');
+        $publicKey = $keys->publicKey();
+        if (! $deployment?->platform->active || ! Claims::isManagedClient($deployment->platform->issuer)
+            || ! $publicKey || strlen($secret) < 32) {
+            throw ValidationException::withMessages(['deployment' => 'Kiểm tra kết nối LTI của Client, khóa ký HUB và cấu hình cấp tài khoản.']);
+        }
+
+        $email = Str::lower($data['manager_email']);
+        $sessionKey = 'pending_client_password.'.hash('sha256', $tenant->id.'|'.$deployment->id.'|'.$email);
+        $pending = $request->session()->get($sessionKey);
+        $password = $pending && $pending['expires_at'] > time()
+            ? Crypt::decryptString($pending['password']) : Str::password(24);
+        $request->session()->put($sessionKey, [
+            'password' => Crypt::encryptString($password), 'expires_at' => time() + 600,
+        ]);
+        try {
+            $result = Http::acceptJson()->withToken($secret)->withoutRedirecting()->connectTimeout(3)->timeout(8)
+                ->post(rtrim($clientUrl, '/').'/hub/provision', [
+                    'hub_tenant_id' => $tenant->id,
+                    'tenant_name' => $tenant->name,
+                    'manager_name' => $data['manager_name'],
+                    'manager_email' => $email,
+                    'password' => $password,
+                    'client_id' => $deployment->platform->client_id,
+                    'deployment_id' => $deployment->deployment_id,
+                    'login_url' => rtrim(config('app.url'), '/').route('lti.login', absolute: false),
+                    'launch_url' => rtrim(config('app.url'), '/').route('lti.launch', absolute: false),
+                    'public_key' => $publicKey,
+                ]);
+        } catch (ConnectionException) {
+            throw ValidationException::withMessages(['deployment' => 'HUB chưa nhận được phản hồi từ Client. Kiểm tra kết nối rồi thử lại.']);
+        }
+
+        $passwordIssued = $result->json('password_issued');
+        if (! $result->successful() || ! is_bool($passwordIssued)) {
+            $message = $result->conflict()
+                ? 'Client báo trùng tổ chức, email hoặc kết nối LTI. Hãy kiểm tra thông tin đã đăng ký.'
+                : 'Client chưa xác nhận cấp tài khoản. Hãy kiểm tra cấu hình kết nối.';
+            throw ValidationException::withMessages(['deployment' => $message]);
+        }
+
+        DB::table('lti_platforms')->where('id', $deployment->lti_platform_id)->whereNull('ags_token_url')
+            ->update(['ags_token_url' => rtrim($clientUrl, '/').'/lti/token']);
+        $request->session()->forget($sessionKey);
+
+        return response()->view('admin.tenant-client-credentials', [
+            'tenant' => $tenant,
+            'name' => $data['manager_name'],
+            'email' => $email,
+            'clientUrl' => $clientUrl,
+            'password' => $passwordIssued ? $password : null,
+        ])->header('Cache-Control', 'no-store, private');
+    }
+
     /** @return array<string, mixed> */
     private function tenantData(Request $request, ?Tenant $tenant = null): array
     {
@@ -73,7 +146,7 @@ class AdminTenantController extends Controller
             ->when($request->filled('q'), fn ($query) => $query->where(fn ($query) => $query->where('lti_identities.name', 'like', '%'.$request->query('q').'%')->orWhere('email', 'like', '%'.$request->query('q').'%')->orWhere('subject', 'like', '%'.$request->query('q').'%')))
             ->when($request->filled('role'), fn ($query) => $query->whereJsonContains('roles', $request->query('role')))
             ->when($request->filled('user'), fn ($query) => $query->where('lti_identity_id', $request->query('user')))
-            ->select('tenant_identity.*', 'lti_identities.name', 'email', 'subject', 'lti_platforms.name as platform_name')
+            ->select('tenant_identity.*', 'lti_identities.name', 'email', 'subject', 'lti_platforms.name as platform_name', 'lti_platforms.issuer as platform_issuer')
             ->orderByDesc('last_access_at')->paginate(20, ['*'], 'users_page')->withQueryString();
         $contents = H5pContent::with('library')->where('tenant_id', $tenant->id)
             ->when($request->filled('q'), fn ($query) => $query->where('title', 'like', '%'.$request->query('q').'%'))
@@ -101,6 +174,7 @@ class AdminTenantController extends Controller
         $data = $request->validate([
             'name' => $this->plainTextRules(), 'issuer' => 'required|url|max:512', 'client_id' => $this->plainTextRules(),
             'authorization_url' => 'required|url|max:2048', 'jwks_url' => 'required|url|max:2048',
+            'ags_token_url' => 'sometimes|nullable|url|max:2048',
             'deployment_id' => $this->plainTextRules(), 'allowed_origins' => 'required|string|max:10000',
             'platform_active' => 'required|boolean', 'active' => 'required|boolean',
         ]);
@@ -108,6 +182,9 @@ class AdminTenantController extends Controller
             if (! Claims::validUrl($data[$key])) {
                 throw ValidationException::withMessages([$key => 'URL phải dùng HTTPS; HTTP chỉ dùng khi bật LTI_ALLOW_HTTP.']);
             }
+        }
+        if (isset($data['ags_token_url']) && ! ScoreService::isPlatformUrl($data['ags_token_url'], $data['issuer'])) {
+            throw ValidationException::withMessages(['ags_token_url' => 'URL cấp token AGS phải cùng origin với Issuer và không chứa query hoặc fragment.']);
         }
         $origins = array_values(array_unique(array_filter(array_map('trim', preg_split('/\R/', $data['allowed_origins'])))));
         foreach ($origins as $origin) {
@@ -129,7 +206,8 @@ class AdminTenantController extends Controller
             if ($existing && $existing->tenant_id !== $tenant->id) {
                 throw ValidationException::withMessages(['deployment_id' => 'Deployment đã thuộc đơn vị khác.']);
             }
-            $platform->update(['name' => $data['name'], 'authorization_url' => $data['authorization_url'], 'jwks_url' => $data['jwks_url'], 'allowed_origins' => $origins, 'active' => $data['platform_active']]);
+            $platform->update(['name' => $data['name'], 'authorization_url' => $data['authorization_url'], 'jwks_url' => $data['jwks_url'], 'allowed_origins' => $origins, 'active' => $data['platform_active']]
+                + array_intersect_key($data, ['ags_token_url' => true]));
             LtiDeployment::updateOrCreate(['lti_platform_id' => $platform->id, 'deployment_id' => $data['deployment_id']], ['tenant_id' => $tenant->id, 'active' => $data['active']]);
         });
 

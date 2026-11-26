@@ -57,10 +57,11 @@ class LaunchService
         $localRole = DB::table('tenant_identity')->join('lti_identities', 'lti_identities.id', '=', 'tenant_identity.lti_identity_id')
             ->where('tenant_id', $deployment->tenant_id)->where('lti_platform_id', $platform->id)
             ->where('subject', $claims['sub'])->value('local_role');
-        $canAuthor = $localRole === null ? Claims::canAuthor($roles) : in_array($localRole, ['teacher', 'tenant-admin'], true);
+        $canAuthor = Claims::canAuthorForPlatform($roles, $localRole, $platform->issuer);
         $settings = null;
         $resourceId = null;
         $contentUuid = null;
+        $lineItem = null;
         $contextId = Claims::get($claims, 'context')['id'] ?? null;
         abort_unless($contextId === null || (is_string($contextId) && strlen($contextId) <= 255), 400);
         if ($type === 'LtiDeepLinkingRequest') {
@@ -84,9 +85,16 @@ class LaunchService
                 $contentUuid = $parameters['content_id'] ?? null;
             }
             abort_unless($contentUuid === null || (is_string($contentUuid) && Str::isUuid($contentUuid)), 400, 'Invalid content ID.');
+            $endpoint = $claims[ScoreService::ENDPOINT] ?? null;
+            if ($platform->ags_token_url && ! $canAuthor && in_array(Claims::LEARNER, $roles, true)
+                && is_array($endpoint) && is_array($endpoint['scope'] ?? null) && in_array(ScoreService::SCOPE, $endpoint['scope'], true)
+                && is_string($endpoint['lineitem'] ?? null) && strlen($endpoint['lineitem']) <= 2048
+                && ScoreService::isPlatformUrl($endpoint['lineitem'], $platform->issuer)) {
+                $lineItem = $endpoint['lineitem'];
+            }
         }
 
-        return DB::transaction(function () use ($login, $platform, $deployment, $claims, $roles, $type, $canAuthor, $contextId, $resourceId, $contentUuid, $settings) {
+        return DB::transaction(function () use ($login, $platform, $deployment, $claims, $roles, $type, $canAuthor, $contextId, $resourceId, $contentUuid, $settings, $lineItem): LtiLaunch {
             $consumed = LtiLogin::whereKey($login->id)->whereNull('consumed_at')->where('expires_at', '>', now())->update(['consumed_at' => now()]);
             abort_unless($consumed === 1, 401, 'Login has already been used.');
             $identity = LtiIdentity::updateOrCreate(['lti_platform_id' => $platform->id, 'subject' => $claims['sub']], [
@@ -120,6 +128,7 @@ class LaunchService
                 'lti_identity_id' => $identity->id, 'message_type' => $type, 'roles' => $roles,
                 'can_author' => $canAuthor, 'context_id' => $contextId, 'resource_link_id' => $resourceId,
                 'content_uuid' => $contentUuid, 'deep_linking_settings' => $settings,
+                'ags_lineitem_url' => $lineItem,
                 'expires_at' => now()->addSeconds(config('lti.launch_lifetime')),
             ]);
         });

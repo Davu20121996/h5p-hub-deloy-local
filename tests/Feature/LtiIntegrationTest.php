@@ -6,6 +6,7 @@ use App\H5p\LibraryInstaller;
 use App\H5p\Runtime;
 use App\Lti\Claims;
 use App\Lti\KeyStore;
+use App\Lti\ScoreService;
 use App\Models\H5pContent;
 use App\Models\H5pLibrary;
 use App\Models\LtiDeployment;
@@ -117,6 +118,22 @@ class LtiIntegrationTest extends TestCase
         ]);
     }
 
+    public function test_managed_client_launch_uses_signed_roles_and_local_restrictions(): void
+    {
+        config(['lti.managed_client_url' => $this->platform->issuer]);
+        $this->launch([Claims::PREFIX.'roles' => [Claims::ADMINISTRATOR]])->assertRedirect();
+        $launch = LtiLaunch::sole();
+        $this->assertTrue($launch->canManageTenant());
+        $this->get(route('workspace.tenant', $launch))->assertOk();
+        DB::table('tenant_identity')->where('lti_identity_id', $launch->lti_identity_id)->update(['local_role' => 'tenant-admin']);
+        $this->launch([Claims::PREFIX.'roles' => [Claims::LEARNER]])->assertForbidden();
+        $this->launch()->assertRedirect();
+        $teacher = LtiLaunch::where('id', '!=', $launch->id)->sole();
+        $this->assertFalse($teacher->canManageTenant());
+        DB::table('tenant_identity')->where('lti_identity_id', $launch->lti_identity_id)->update(['local_role' => 'learner']);
+        $this->launch([Claims::PREFIX.'roles' => [Claims::ADMINISTRATOR]])->assertForbidden();
+    }
+
     public function test_tenant_admin_manages_only_members_of_their_tenant_and_reads_public_key(): void
     {
         $launch = $this->activeLaunch();
@@ -139,6 +156,45 @@ class LtiIntegrationTest extends TestCase
         $this->patch(route('workspace.tenant.role', [$launch, $foreign]), ['local_role' => 'teacher'])->assertNotFound();
         $membership->update(['local_role' => 'teacher']);
         $this->get(route('workspace.tenant', $launch))->assertForbidden();
+    }
+
+    public function test_learner_result_uses_the_signed_launch_subject_and_line_item(): void
+    {
+        $tokenUrl = $this->platform->issuer.'/lti/token';
+        $lineItem = $this->platform->issuer.'/lti/courses/10/lineitems/20';
+        $this->platform->update(['ags_token_url' => $tokenUrl]);
+        app(KeyStore::class)->generate();
+        Http::fake([
+            $tokenUrl => Http::response(['access_token' => 'client-access-token']),
+            $lineItem.'/scores' => Http::response(status: 204),
+        ]);
+        $content = $this->content(changes: ['status' => 'published']);
+        $this->launch([
+            'sub' => '42',
+            Claims::PREFIX.'message_type' => 'LtiResourceLinkRequest',
+            Claims::PREFIX.'roles' => [Claims::LEARNER],
+            Claims::PREFIX.'resource_link' => ['id' => 'activity-20'],
+            Claims::PREFIX.'custom' => ['content_id' => $content->uuid],
+            ScoreService::ENDPOINT => ['scope' => [ScoreService::SCOPE], 'lineitem' => $lineItem],
+        ])->assertRedirect();
+        $launch = LtiLaunch::sole();
+        $this->assertSame($lineItem, $launch->ags_lineitem_url);
+
+        $result = ['timestamp' => now()->utc()->format('Y-m-d\TH:i:s.v\Z')];
+        $this->postJson(route('content.result', [$launch, $content->uuid]), $result + ['score' => 3, 'maximum' => 2])
+            ->assertUnprocessable();
+        $this->postJson(route('content.result', [$launch, Str::uuid()]), $result)->assertForbidden();
+        $this->postJson(route('content.result', [$launch, $content->uuid]), $result + ['score' => 1, 'maximum' => 2, 'userId' => 'other-user'])
+            ->assertNoContent();
+
+        Http::assertSent(fn ($request) => $request->url() === $tokenUrl && $request['scope'] === ScoreService::SCOPE);
+        [$scoreRequest] = Http::recorded(fn ($request) => $request->url() === $lineItem.'/scores')->sole();
+        $this->assertTrue($scoreRequest->hasHeader('Authorization', 'Bearer client-access-token'));
+        $this->assertTrue($scoreRequest->hasHeader('Content-Type', 'application/vnd.ims.lis.v1.score+json'));
+        $score = json_decode($scoreRequest->body(), true, flags: JSON_THROW_ON_ERROR);
+        $this->assertSame('42', $score['userId']);
+        $this->assertEquals(1, $score['scoreGiven']);
+        $this->assertSame('FullyGraded', $score['gradingProgress']);
     }
 
     public function test_local_permissions_survive_lms_login_and_revocation_applies_to_existing_sessions(): void

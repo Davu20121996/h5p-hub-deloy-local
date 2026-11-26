@@ -15,6 +15,8 @@ x-app: &app
     APP_NAME: H5P Hub
     APP_ENV: production
     APP_URL: ${APP_URL:?Set APP_URL in .env}
+    LTI_MANAGED_CLIENT_URL: ${LTI_MANAGED_CLIENT_URL:-}
+    HUB_PROVISIONING_SECRET: ${HUB_PROVISIONING_SECRET:-}
     APP_DEBUG: "false"
     LOG_LEVEL: warning
     LTI_ALLOW_HTTP: "false"

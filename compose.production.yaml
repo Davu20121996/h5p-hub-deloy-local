@@ -28,6 +28,8 @@ x-app: &app
     APP_KEY: ${APP_KEY:?Set APP_KEY in Dockhand}
     APP_DEBUG: "false"
     APP_URL: ${APP_URL:?Set APP_URL in Dockhand}
+    LTI_MANAGED_CLIENT_URL: ${LTI_MANAGED_CLIENT_URL:-}
+    HUB_PROVISIONING_SECRET: ${HUB_PROVISIONING_SECRET:-}
     LOG_CHANNEL: stderr
     LOG_LEVEL: warning
     LTI_DEMO_ENABLED: "false"

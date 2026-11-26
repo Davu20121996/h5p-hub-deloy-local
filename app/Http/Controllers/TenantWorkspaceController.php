@@ -2,9 +2,11 @@
 
 namespace App\Http\Controllers;
 
+use App\Lti\Claims;
 use App\Lti\KeyStore;
 use App\Models\LtiIdentity;
 use App\Models\LtiLaunch;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\View\View;
@@ -21,12 +23,14 @@ class TenantWorkspaceController extends Controller
 
         return view('workspace.tenant', [
             'launch' => $launch, 'members' => $members, 'publicKey' => $keys->publicKey(),
+            'canEditRoles' => ! Claims::isManagedClient($launch->deployment->platform->issuer),
         ]);
     }
 
     public function role(Request $request, LtiLaunch $launch, LtiIdentity $identity): RedirectResponse
     {
         abort_unless($launch->canManageTenant(), 403);
+        abort_if(Claims::isManagedClient($launch->deployment->platform->issuer), 403);
         $data = $request->validate(['local_role' => 'required|in:teacher,learner']);
         $membership = DB::table('tenant_identity')->where('tenant_id', $launch->deployment->tenant_id)
             ->where('lti_identity_id', $identity->id);

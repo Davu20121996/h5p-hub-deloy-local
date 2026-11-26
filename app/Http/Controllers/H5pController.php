@@ -3,10 +3,13 @@
 namespace App\Http\Controllers;
 
 use App\H5p\Runtime;
+use App\Lti\ScoreService;
 use App\Models\H5pContent;
 use App\Models\LtiLaunch;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
 use Illuminate\View\View;
@@ -108,6 +111,23 @@ class H5pController extends Controller
         abort(404, 'Unsupported editor operation.');
     }
 
+    public function result(Request $request, LtiLaunch $launch, string $uuid, ScoreService $scores): Response
+    {
+        abort_unless($launch->canReportResult($uuid), 403);
+        $this->authorizeRead($launch, $uuid);
+        $result = $request->validate([
+            'timestamp' => 'required|date_format:Y-m-d\TH:i:s.v\Z',
+            'score' => 'nullable|required_with:maximum|numeric|min:0|lte:maximum',
+            'maximum' => 'nullable|required_with:score|numeric|gt:0|max:1000000000',
+        ]);
+        $timestamp = Carbon::parse($result['timestamp']);
+        abort_if($timestamp->lt($launch->created_at->copy()->subSeconds(5)) || $timestamp->gt(now()->addSeconds(5)), 422);
+
+        $scores->send($launch, $result);
+
+        return response()->noContent();
+    }
+
     public function files(LtiLaunch $launch, string $path = ''): BinaryFileResponse
     {
         Runtime::safePath($path);
@@ -157,5 +177,4 @@ class H5pController extends Controller
             'Content-Security-Policy' => 'sandbox',
         ]);
     }
-
 }

@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Lti\Claims;
+use App\Lti\ScoreService;
 use App\Models\LtiDeployment;
 use App\Models\LtiPlatform;
 use App\Models\Tenant;
@@ -30,6 +31,7 @@ class ProvisionLti extends Command
                 'tenant_slug' => 'required|alpha_dash|max:100', 'tenant_name' => 'required|string|max:255',
                 'name' => 'required|string|max:255', 'issuer' => 'required|url|max:512', 'client_id' => 'required|string|max:255',
                 'authorization_url' => 'required|url', 'jwks_url' => 'required|url',
+                'ags_token_url' => 'sometimes|nullable|url|max:2048',
                 'deployment_id' => 'required|string|max:255', 'allowed_origins' => 'required|array|min:1',
                 'allowed_origins.*' => 'required|url',
                 'tenant_active' => 'sometimes|boolean', 'platform_active' => 'sometimes|boolean', 'deployment_active' => 'sometimes|boolean',
@@ -44,13 +46,17 @@ class ProvisionLti extends Command
                     throw new \InvalidArgumentException('Allowed origins must be exact origins without paths or wildcards.');
                 }
             }
+            if (isset($data['ags_token_url']) && ! ScoreService::isPlatformUrl($data['ags_token_url'], $data['issuer'])) {
+                throw new \InvalidArgumentException('AGS token URL must use the issuer origin and omit query and fragment.');
+            }
             DB::transaction(function () use ($data) {
                 $tenant = Tenant::firstOrCreate(['slug' => $data['tenant_slug']], ['name' => $data['tenant_name']]);
                 $tenant->update(['name' => $data['tenant_name']] + (array_key_exists('tenant_active', $data) ? ['active' => $data['tenant_active']] : []));
                 $platform = LtiPlatform::updateOrCreate(['issuer' => $data['issuer'], 'client_id' => $data['client_id']], [
                     'name' => $data['name'], 'authorization_url' => $data['authorization_url'], 'jwks_url' => $data['jwks_url'],
                     'allowed_origins' => array_map(fn ($origin) => Claims::origin($origin), $data['allowed_origins']),
-                ] + (array_key_exists('platform_active', $data) ? ['active' => $data['platform_active']] : []));
+                ] + (array_key_exists('platform_active', $data) ? ['active' => $data['platform_active']] : [])
+                    + array_intersect_key($data, ['ags_token_url' => true]));
                 $deployment = LtiDeployment::firstOrCreate([
                     'lti_platform_id' => $platform->id, 'deployment_id' => $data['deployment_id'],
                 ], ['tenant_id' => $tenant->id]);

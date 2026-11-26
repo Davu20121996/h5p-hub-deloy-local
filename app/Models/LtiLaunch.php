@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Lti\Claims;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -40,7 +41,20 @@ class LtiLaunch extends Model
 
     public function canManageTenant(): bool
     {
-        return $this->localRole() === 'tenant-admin';
+        $localRole = $this->localRole();
+        if (Claims::isManagedClient($this->deployment->platform->issuer)) {
+            return $this->can_author && in_array($localRole, [null, 'tenant-admin'], true)
+                && in_array(Claims::ADMINISTRATOR, $this->roles, true);
+        }
+
+        return $localRole === 'tenant-admin';
+    }
+
+    public function canReportResult(string $uuid): bool
+    {
+        return ! $this->can_author && $this->message_type === 'LtiResourceLinkRequest'
+            && $this->content_uuid === $uuid && $this->ags_lineitem_url !== null
+            && in_array(Claims::LEARNER, $this->roles, true) && $this->deployment->platform->ags_token_url !== null;
     }
 
     public function content(string $uuid): H5pContent

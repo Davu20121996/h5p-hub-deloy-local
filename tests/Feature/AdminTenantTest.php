@@ -9,10 +9,12 @@ use App\Models\LtiDeployment;
 use App\Models\LtiIdentity;
 use App\Models\Tenant;
 use App\Models\User;
+use Database\Seeders\ResetHubLearningDataSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 use ZipArchive;
@@ -235,9 +237,73 @@ class AdminTenantTest extends TestCase
         $this->put(route('admin.tenants.update', $tenant), [])->assertForbidden();
         $this->post(route('admin.tenants.contents.import', [$tenant, $content->lti_identity_id]))->assertForbidden();
         $this->post(route('admin.tenants.users.store', $tenant))->assertForbidden();
+        $this->post(route('admin.tenants.client-credentials', $tenant))->assertForbidden();
         $this->get(route('admin.tenants.preview', [$tenant, $content]))->assertForbidden();
         $this->get(route('admin.tenants.export', [$tenant, $content]))->assertForbidden();
         $this->get(route('admin.tenants.files', [$tenant, $content, 'path' => 'content/'.$content->id.'/a.txt']))->assertForbidden();
         $this->patch(route('admin.tenants.visibility', [$tenant, $content]), ['admin_hidden' => '1'])->assertForbidden();
+    }
+
+    public function test_admin_can_generate_initial_client_credentials_for_an_active_tenant(): void
+    {
+        $this->loginAdmin();
+        config([
+            'app.url' => 'https://hub.example.com',
+            'lti.key_directory' => $this->root.'/keys',
+            'lti.managed_client_url' => 'https://school.example.com',
+            'lti.provisioning_secret' => str_repeat('a', 32),
+        ]);
+        app(KeyStore::class)->generate();
+        Http::fake(['https://school.example.com/hub/provision' => Http::sequence()
+            ->push(['password_issued' => true])->push(['password_issued' => false])]);
+        Http::preventStrayRequests();
+        $tenant = Tenant::factory()->create();
+        $this->post(route('admin.tenants.connections.store', $tenant), $this->connectionData())->assertSessionHasNoErrors();
+        $deployment = LtiDeployment::sole();
+        $this->get(route('admin.tenants.show', $tenant))->assertOk()
+            ->assertSee(route('admin.tenants.client-credentials', $tenant));
+
+        $data = [
+            'manager_name' => 'Tenant Manager',
+            'manager_email' => 'Manager@example.com',
+            'deployment' => $deployment->id,
+        ];
+        $response = $this->post(route('admin.tenants.client-credentials', $tenant), $data)
+            ->assertOk()->assertSee('manager@example.com')->assertSee($tenant->name);
+        $this->assertSame('https://school.example.com/lti/token', $deployment->platform->ags_token_url);
+        $this->assertNull($this->post(route('admin.tenants.client-credentials', $tenant), $data)->assertOk()->viewData('password'));
+        Http::assertSent(fn ($request) => $request->url() === 'https://school.example.com/hub/provision'
+            && $request->hasHeader('Authorization', 'Bearer '.str_repeat('a', 32))
+            && $request['manager_email'] === 'manager@example.com'
+            && $request['deployment_id'] === 'school-deployment'
+            && $request['password'] === $response->viewData('password'));
+        $this->assertStringContainsString('no-store', $response->headers->get('Cache-Control'));
+        $this->assertSame(24, strlen($response->viewData('password')));
+        $this->assertDatabaseCount('users', 1);
+
+        $tenant->update(['active' => false]);
+        $this->post(route('admin.tenants.client-credentials', $tenant))->assertForbidden();
+    }
+
+    public function test_reset_seeder_clears_learning_data_and_keeps_setup(): void
+    {
+        $deployment = LtiDeployment::factory()->create();
+        $identity = LtiIdentity::factory()->create(['lti_platform_id' => $deployment->lti_platform_id]);
+        H5pContent::factory()->create(['tenant_id' => $deployment->tenant_id, 'lti_identity_id' => $identity->id]);
+        DB::table('tenant_identity')->insert([
+            'tenant_id' => $deployment->tenant_id, 'lti_identity_id' => $identity->id, 'roles' => '[]',
+        ]);
+        $this->loginAdmin();
+
+        $this->seed(ResetHubLearningDataSeeder::class);
+        $this->seed(ResetHubLearningDataSeeder::class);
+
+        foreach (['h5p_contents', 'lti_identities', 'tenant_identity', 'lti_launches', 'lti_logins', 'lti_resource_links'] as $table) {
+            $this->assertDatabaseEmpty($table);
+        }
+
+        foreach (['tenants', 'lti_platforms', 'lti_deployments', 'h5p_libraries', 'users'] as $table) {
+            $this->assertDatabaseCount($table, 1);
+        }
     }
 }

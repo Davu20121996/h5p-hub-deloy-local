@@ -19,7 +19,7 @@ class RequireLtiLaunch
         abort_unless($launch->expires_at->isFuture() && $deployment->active
             && $deployment->tenant->active && $deployment->platform->active, 403, 'Launch session expired or disabled.');
         $localRole = $launch->localRole();
-        $launch->can_author = $localRole === null ? Claims::canAuthor($launch->roles) : in_array($localRole, ['teacher', 'tenant-admin'], true);
+        $launch->can_author = Claims::canAuthorForPlatform($launch->roles, $localRole, $deployment->platform->issuer);
         $response = $next($request);
         $origins = array_filter($deployment->platform->allowed_origins, fn ($origin) => Claims::validUrl($origin));
         $response->headers->set('Content-Security-Policy', "frame-ancestors 'self' ".implode(' ', $origins));
