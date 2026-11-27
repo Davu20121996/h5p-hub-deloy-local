@@ -2,8 +2,8 @@
 @section('content')
 <h1>{{ $tenant->name }}</h1><p>Mã: {{ $tenant->slug }} · {{ $tenant->active ? 'Hoạt động' : 'Đã khóa' }} · Tạo ngày {{ $tenant->created_at->format('d/m/Y H:i') }}</p>
 <nav class="hub-nav hub-tabs" aria-label="Đơn vị">@foreach(['profile'=>'Hồ sơ', 'connections'=>'Kết nối LTI', 'users'=>'Người dùng LMS', 'contents'=>'Bài H5P'] as $key=>$label)<a href="{{ route('admin.tenants.show', [$tenant, 'tab'=>$key]) }}" @if(request('tab', 'profile') === $key) aria-current="page" @endif>{{ $label }}</a>@endforeach</nav>
-@if(request('tab', 'profile') === 'profile')
 @php($clientDeployments = $deployments->filter(fn ($deployment) => $deployment->active && $deployment->platform->active && \App\Lti\Claims::isManagedClient($deployment->platform->issuer)))
+@if(request('tab', 'profile') === 'profile')
 @if($tenant->active && $clientDeployments->isNotEmpty())
 <section class="hub-card">
     <h2>Cấp tài khoản Tenant Admin trên Client</h2>
@@ -33,7 +33,7 @@
 @elseif(request('tab') === 'users')
 <section class="hub-card">
     <h2>Thêm người dùng và cấp quyền từ LMS</h2>
-    <p class="muted">Thêm giáo viên đã có tài khoản trên LMS để nhập và gán bài đầu tiên. Với Platform 9080, Subject LTI là ID số của tài khoản giáo viên.</p>
+    <p class="muted">Dùng Subject LTI để thêm người dùng đã có tài khoản. Với tên đăng nhập thêm thủ công như gvsmb, chọn Đồng bộ tài khoản Client ở dòng người dùng.</p>
     @php($authorDeployments = $deployments->filter(fn ($deployment) => $deployment->active && $deployment->platform->active))
     @if($tenant->active && $authorDeployments->isNotEmpty())
         <form class="hub-form hub-form--grid" method="post" action="{{ route('admin.tenants.users.store', $tenant) }}">
@@ -69,9 +69,33 @@
 @endforeach
 </select><button class="hub-button hub-button--secondary">Lưu quyền</button></form>
 @if($member->first_access_at === null)
-<p class="muted">Đã thêm thủ công · Chưa truy cập từ LMS</p>
+    @php($matchingDeployments = $clientDeployments->where('lti_platform_id', $member->lti_platform_id))
+    @if(\App\Lti\Claims::isManagedClient($member->platform_issuer) && ctype_digit($member->subject))
+        <p class="muted">Đã có Subject Client · Chưa truy cập từ LMS</p>
+    @else
+        <p class="muted">Đã thêm thủ công · Chưa truy cập từ LMS</p>
+    @endif
+    @if($tenant->active && $matchingDeployments->isNotEmpty() && $member->local_role !== 'learner' && !ctype_digit($member->subject)
+        && preg_match('/\A[a-zA-Z0-9][a-zA-Z0-9._-]{2,63}\z/', $member->subject))
+        <form class="hub-form" method="post" action="{{ route('admin.tenants.users.client-sync', [$tenant, $member->lti_identity_id]) }}">
+            @csrf
+            <label for="sync-deployment-{{ $member->lti_identity_id }}">Kết nối Client</label>
+            <select id="sync-deployment-{{ $member->lti_identity_id }}" name="deployment" required>
+                @foreach($matchingDeployments as $deployment)
+                    <option value="{{ $deployment->id }}">{{ $deployment->deployment_id }}</option>
+                @endforeach
+            </select>
+            <label for="sync-role-{{ $member->lti_identity_id }}">Vai trò trên Client</label>
+            <select id="sync-role-{{ $member->lti_identity_id }}" name="account_role" required>
+                <option value="">Chọn vai trò</option>
+                <option value="teacher" @selected($member->local_role === 'teacher')>Giáo viên</option>
+                <option value="tenant_admin" @selected($member->local_role === 'tenant-admin')>Tenant Admin</option>
+            </select>
+            <button class="hub-button">Đồng bộ tài khoản Client</button>
+        </form>
+    @endif
 @endif
-@if(($member->first_access_at === null && $member->local_role === null) || \App\Lti\Claims::canAuthorForPlatform(json_decode($member->roles, true) ?? [], $member->local_role, $member->platform_issuer))
+@if(($member->first_access_at === null && $member->local_role !== 'learner') || \App\Lti\Claims::canAuthorForPlatform(json_decode($member->roles, true) ?? [], $member->local_role, $member->platform_issuer))
 <details class="hub-inline-panel">
     <summary>Nhập bài .h5p</summary>
     <form class="hub-form" method="post" enctype="multipart/form-data" action="{{ route('admin.tenants.contents.import', [$tenant, $member->lti_identity_id]) }}">

@@ -71,6 +71,84 @@ class AdminTenantController extends Controller
 
         $deployment = LtiDeployment::with('platform')->where('tenant_id', $tenant->id)
             ->where('active', true)->find($data['deployment']);
+        $account = $this->provisionClientAccount($request, $tenant, $deployment, $keys, [
+            'manager_name' => $data['manager_name'],
+            'manager_email' => Str::lower($data['manager_email']),
+        ]);
+        $request->session()->forget($account['sessionKey']);
+
+        return response()->view('admin.tenant-client-credentials', [
+            'tenant' => $tenant,
+            'login' => Str::lower($data['manager_email']),
+            'loginLabel' => 'Email đăng nhập Client',
+            'clientUrl' => $account['clientUrl'],
+            'password' => $account['password'],
+        ])->header('Cache-Control', 'no-store, private');
+    }
+
+    public function syncClientAccount(Request $request, Tenant $tenant, LtiIdentity $identity, KeyStore $keys): Response
+    {
+        abort_unless($tenant->active, 403);
+        $data = $request->validate([
+            'deployment' => 'required|integer',
+            'account_role' => 'required|in:teacher,tenant_admin',
+        ]);
+        $membership = ['tenant_id' => $tenant->id, 'lti_identity_id' => $identity->id];
+        $member = DB::table('tenant_identity')->where($membership)->first();
+        abort_unless($member, 404);
+        $username = Str::lower($identity->subject);
+        if ($member->first_access_at !== null || $member->local_role === 'learner'
+            || ! preg_match('/\A[a-z0-9][a-z0-9._-]{2,63}\z/', $username) || ctype_digit($username)) {
+            throw ValidationException::withMessages(['deployment' => 'Chỉ đồng bộ định danh thêm thủ công có tên đăng nhập hợp lệ.']);
+        }
+
+        $deployment = LtiDeployment::with('platform')->where('tenant_id', $tenant->id)
+            ->where('lti_platform_id', $identity->lti_platform_id)->where('active', true)->find($data['deployment']);
+        $account = $this->provisionClientAccount($request, $tenant, $deployment, $keys, [
+            'manager_name' => $identity->name ?: $username,
+            'manager_username' => $username,
+            'manager_email' => $identity->email,
+            'account_role' => $data['account_role'],
+        ]);
+
+        DB::transaction(function () use ($tenant, $identity, $membership, $account, $data): void {
+            $clientIdentity = LtiIdentity::firstOrCreate([
+                'lti_platform_id' => $identity->lti_platform_id,
+                'subject' => $account['subject'],
+            ], ['name' => $identity->name ?: $identity->subject, 'email' => $identity->email]);
+            $member = DB::table('tenant_identity')->where($membership)->lockForUpdate()->first();
+            if (! $member) {
+                return;
+            }
+            abort_if($member->first_access_at !== null || $member->local_role === 'learner', 409);
+
+            $clientMembership = ['tenant_id' => $tenant->id, 'lti_identity_id' => $clientIdentity->id];
+            DB::table('tenant_identity')->insertOrIgnore($clientMembership + ['roles' => '[]']);
+            DB::table('tenant_identity')->where($clientMembership)->whereNull('local_role')->update([
+                'local_role' => $data['account_role'] === 'tenant_admin' ? 'tenant-admin' : 'teacher',
+            ]);
+            DB::table('h5p_contents')->where('tenant_id', $tenant->id)->where('lti_identity_id', $identity->id)
+                ->update(['lti_identity_id' => $clientIdentity->id]);
+            DB::table('tenant_identity')->where($membership)->delete();
+        }, 3);
+        $request->session()->forget($account['sessionKey']);
+
+        return response()->view('admin.tenant-client-credentials', [
+            'tenant' => $tenant,
+            'login' => $username,
+            'loginLabel' => 'Tên đăng nhập Client',
+            'clientUrl' => $account['clientUrl'],
+            'password' => $account['password'],
+            'subject' => $account['subject'],
+        ])->header('Cache-Control', 'no-store, private');
+    }
+
+    /**
+     * @param  array{manager_name: string, manager_email: ?string, manager_username?: string, account_role?: string}  $account
+     * @return array{clientUrl: string, password: ?string, sessionKey: string, subject: ?string}
+     */
+    private function provisionClientAccount(Request $request, Tenant $tenant, ?LtiDeployment $deployment, KeyStore $keys, array $account): array
+    {
         $clientUrl = (string) config('lti.managed_client_url');
         $secret = (string) config('lti.provisioning_secret');
         $publicKey = $keys->publicKey();
@@ -79,8 +157,10 @@ class AdminTenantController extends Controller
             throw ValidationException::withMessages(['deployment' => 'Kiểm tra kết nối LTI của Client, khóa ký HUB và cấu hình cấp tài khoản.']);
         }
 
-        $email = Str::lower($data['manager_email']);
-        $sessionKey = 'pending_client_password.'.hash('sha256', $tenant->id.'|'.$deployment->id.'|'.$email);
+        $role = $account['account_role'] ?? null;
+        $login = $account['manager_username'] ?? $account['manager_email'];
+        $sessionKey = 'pending_client_password.'.hash('sha256', $tenant->id.'|'.$deployment->id.'|'.$login.'|'.$role);
+        $endpoint = $role === null ? '/hub/provision' : '/hub/provision/accounts';
         $pending = $request->session()->get($sessionKey);
         $password = $pending && $pending['expires_at'] > time()
             ? Crypt::decryptString($pending['password']) : Str::password(24);
@@ -89,11 +169,9 @@ class AdminTenantController extends Controller
         ]);
         try {
             $result = Http::acceptJson()->withToken($secret)->withoutRedirecting()->connectTimeout(3)->timeout(8)
-                ->post(rtrim($clientUrl, '/').'/hub/provision', [
+                ->post(rtrim($clientUrl, '/').$endpoint, $account + [
                     'hub_tenant_id' => $tenant->id,
                     'tenant_name' => $tenant->name,
-                    'manager_name' => $data['manager_name'],
-                    'manager_email' => $email,
                     'password' => $password,
                     'client_id' => $deployment->platform->client_id,
                     'deployment_id' => $deployment->deployment_id,
@@ -113,17 +191,20 @@ class AdminTenantController extends Controller
             throw ValidationException::withMessages(['deployment' => $message]);
         }
 
+        $subject = $result->json('subject');
+        if ($role !== null && (! is_string($subject) || ! preg_match('/\A[1-9][0-9]{0,18}\z/', $subject) || $result->json('role') !== $role)) {
+            throw ValidationException::withMessages(['deployment' => 'Client chưa trả về định danh LTI và vai trò hợp lệ cho tài khoản này.']);
+        }
+
         DB::table('lti_platforms')->where('id', $deployment->lti_platform_id)->whereNull('ags_token_url')
             ->update(['ags_token_url' => rtrim($clientUrl, '/').'/lti/token']);
-        $request->session()->forget($sessionKey);
 
-        return response()->view('admin.tenant-client-credentials', [
-            'tenant' => $tenant,
-            'name' => $data['manager_name'],
-            'email' => $email,
+        return [
             'clientUrl' => $clientUrl,
             'password' => $passwordIssued ? $password : null,
-        ])->header('Cache-Control', 'no-store, private');
+            'sessionKey' => $sessionKey,
+            'subject' => $role !== null ? $subject : null,
+        ];
     }
 
     /** @return array<string, mixed> */
@@ -146,7 +227,7 @@ class AdminTenantController extends Controller
             ->when($request->filled('q'), fn ($query) => $query->where(fn ($query) => $query->where('lti_identities.name', 'like', '%'.$request->query('q').'%')->orWhere('email', 'like', '%'.$request->query('q').'%')->orWhere('subject', 'like', '%'.$request->query('q').'%')))
             ->when($request->filled('role'), fn ($query) => $query->whereJsonContains('roles', $request->query('role')))
             ->when($request->filled('user'), fn ($query) => $query->where('lti_identity_id', $request->query('user')))
-            ->select('tenant_identity.*', 'lti_identities.name', 'email', 'subject', 'lti_platforms.name as platform_name', 'lti_platforms.issuer as platform_issuer')
+            ->select('tenant_identity.*', 'lti_identities.name', 'email', 'subject', 'lti_platform_id', 'lti_platforms.name as platform_name', 'lti_platforms.issuer as platform_issuer')
             ->orderByDesc('last_access_at')->paginate(20, ['*'], 'users_page')->withQueryString();
         $contents = H5pContent::with('library')->where('tenant_id', $tenant->id)
             ->when($request->filled('q'), fn ($query) => $query->where('title', 'like', '%'.$request->query('q').'%'))

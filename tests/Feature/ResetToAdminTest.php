@@ -20,6 +20,8 @@ class ResetToAdminTest extends TestCase
     public function test_reset_removes_tenant_data_and_keeps_existing_admin_login(): void
     {
         $admin = User::factory()->create(['is_admin' => true, 'active' => true, 'username' => 'original-admin']);
+        User::factory()->create(['is_admin' => true, 'active' => true]);
+        User::factory()->create(['is_admin' => true, 'active' => false]);
         User::factory()->create(['is_admin' => false]);
         $deployment = LtiDeployment::factory()->create();
         $identity = LtiIdentity::factory()->create(['lti_platform_id' => $deployment->lti_platform_id]);
@@ -28,7 +30,7 @@ class ResetToAdminTest extends TestCase
             'tenant_id' => $deployment->tenant_id, 'lti_identity_id' => $identity->id, 'roles' => '[]',
         ]);
 
-        $admin = $admin->fresh();
+        $adminAccounts = DB::table('users')->where('is_admin', true)->orderBy('id')->get();
 
         $this->seed(ResetToAdminSeeder::class);
         $this->seed(ResetToAdminSeeder::class);
@@ -37,23 +39,24 @@ class ResetToAdminTest extends TestCase
             $this->assertDatabaseEmpty($table);
         }
 
-        $this->assertSame($admin->getAttributes(), User::sole()->getAttributes());
+        $this->assertEquals($adminAccounts, DB::table('users')->orderBy('id')->get());
         $this->assertSame(1, H5pLibrary::count());
         $this->post(route('admin.authenticate'), ['username' => 'original-admin', 'password' => 'password'])
             ->assertRedirect(route('admin.index'));
         $this->assertAuthenticatedAs($admin);
     }
 
-    public function test_reset_requires_an_unambiguous_active_admin(): void
+    public function test_reset_aborts_without_an_active_admin(): void
     {
-        User::factory()->count(2)->create(['is_admin' => true, 'active' => true]);
+        User::factory()->create(['is_admin' => true, 'active' => false]);
+        User::factory()->create(['is_admin' => false, 'active' => true]);
         $deployment = LtiDeployment::factory()->create();
 
         try {
             $this->seed(ResetToAdminSeeder::class);
-            $this->fail('Reset must reject multiple active Admin accounts.');
+            $this->fail('Reset requires an active system Admin.');
         } catch (RuntimeException $exception) {
-            $this->assertStringContainsString('RESET_ADMIN_EMAIL', $exception->getMessage());
+            $this->assertSame('Cần ít nhất một Admin hệ thống đang hoạt động trước khi reset.', $exception->getMessage());
         }
 
         $this->assertDatabaseCount('users', 2);

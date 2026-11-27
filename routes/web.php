@@ -27,6 +27,7 @@ Route::middleware(RequireAdmin::class)->prefix('admin')->name('admin.')->group(f
     Route::post('/tenants/{tenant}/connections', [AdminTenantController::class, 'connection'])->name('tenants.connections.store');
     Route::put('/tenants/{tenant}/connections/{deployment}', [AdminTenantController::class, 'connection'])->name('tenants.connections.update');
     Route::post('/tenants/{tenant}/users/{identity}/contents', [AdminTenantController::class, 'import'])->name('tenants.contents.import');
+    Route::post('/tenants/{tenant}/users/{identity}/client-sync', [AdminTenantController::class, 'syncClientAccount'])->name('tenants.users.client-sync');
     Route::patch('/tenants/{tenant}/users/{identity}/role', [AdminTenantController::class, 'role'])->name('tenants.users.role');
     Route::post('/tenants/{tenant}/users', [AdminTenantController::class, 'addAuthor'])->name('tenants.users.store');
     Route::patch('/tenants/{tenant}/contents/{content}/visibility', [AdminTenantController::class, 'visibility'])->name('tenants.visibility');

@@ -285,6 +285,58 @@ class AdminTenantTest extends TestCase
         $this->post(route('admin.tenants.client-credentials', $tenant))->assertForbidden();
     }
 
+    public function test_sync_manual_user_to_client_links_the_numeric_subject_and_preserves_content(): void
+    {
+        $this->loginAdmin();
+        config([
+            'app.url' => 'https://hub.example.com',
+            'lti.key_directory' => $this->root.'/keys',
+            'lti.managed_client_url' => 'https://school.example.com',
+            'lti.provisioning_secret' => str_repeat('a', 32),
+        ]);
+        app(KeyStore::class)->generate();
+        $tenant = Tenant::factory()->create();
+        $this->post(route('admin.tenants.connections.store', $tenant), $this->connectionData())->assertSessionHasNoErrors();
+        $deployment = LtiDeployment::sole();
+        Http::fake(['https://school.example.com/hub/provision/accounts' => Http::sequence()
+            ->push(['subject' => '42', 'role' => 'teacher', 'password_issued' => true])
+            ->push(['subject' => '71', 'role' => 'tenant_admin', 'password_issued' => false])]);
+        Http::preventStrayRequests();
+
+        $teacher = LtiIdentity::factory()->create(['lti_platform_id' => $deployment->lti_platform_id, 'subject' => 'gvsmb', 'email' => null]);
+        $manager = LtiIdentity::factory()->create(['lti_platform_id' => $deployment->lti_platform_id, 'subject' => 'tenant-admin-smb', 'email' => null]);
+        foreach ([$teacher, $manager] as $person) {
+            DB::table('tenant_identity')->insert([
+                'tenant_id' => $tenant->id, 'lti_identity_id' => $person->id, 'roles' => '[]',
+            ]);
+        }
+        $content = H5pContent::factory()->create(['tenant_id' => $tenant->id, 'lti_identity_id' => $teacher->id]);
+        $canonicalTeacher = LtiIdentity::factory()->create(['lti_platform_id' => $deployment->lti_platform_id, 'subject' => '42']);
+        DB::table('tenant_identity')->insert([
+            'tenant_id' => $tenant->id, 'lti_identity_id' => $canonicalTeacher->id, 'roles' => '[]', 'first_access_at' => now(),
+        ]);
+
+        $this->get(route('admin.tenants.show', [$tenant, 'tab' => 'users']))
+            ->assertOk()->assertSee(route('admin.tenants.users.client-sync', [$tenant, $teacher]));
+
+        $teacherResponse = $this->post(route('admin.tenants.users.client-sync', [$tenant, $teacher]), [
+            'deployment' => $deployment->id, 'account_role' => 'teacher',
+        ])->assertOk()->assertSee('gvsmb')->assertSee('42');
+        $this->assertNotEmpty($teacherResponse->viewData('password'));
+        $this->assertSame($canonicalTeacher->id, $content->fresh()->lti_identity_id);
+        $this->assertDatabaseMissing('tenant_identity', ['tenant_id' => $tenant->id, 'lti_identity_id' => $teacher->id]);
+
+        $managerResponse = $this->post(route('admin.tenants.users.client-sync', [$tenant, $manager]), [
+            'deployment' => $deployment->id, 'account_role' => 'tenant_admin',
+        ])->assertOk()->assertSee('tenant-admin-smb')->assertSee('71');
+        $this->assertNull($managerResponse->viewData('password'));
+
+        Http::assertSent(fn ($request) => $request['manager_username'] === 'gvsmb'
+            && $request['account_role'] === 'teacher' && $request['password'] === $teacherResponse->viewData('password'));
+        Http::assertSent(fn ($request) => $request['manager_username'] === 'tenant-admin-smb'
+            && $request['account_role'] === 'tenant_admin');
+    }
+
     public function test_reset_seeder_clears_learning_data_and_keeps_setup(): void
     {
         $deployment = LtiDeployment::factory()->create();

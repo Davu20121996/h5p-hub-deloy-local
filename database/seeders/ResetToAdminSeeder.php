@@ -15,13 +15,8 @@ class ResetToAdminSeeder extends Seeder
         }
 
         DB::transaction(function (): void {
-            $adminEmail = trim((string) env('RESET_ADMIN_EMAIL'));
-            $admins = DB::table('users')->where('is_admin', true)->where('active', true)
-                ->when($adminEmail !== '', fn ($query) => $query->where('email', $adminEmail))
-                ->lockForUpdate()->limit(2)->pluck('id');
-
-            if ($admins->count() !== 1) {
-                throw new RuntimeException('Cần xác định đúng một Admin hệ thống đang hoạt động. Kiểm tra tài khoản hoặc đặt RESET_ADMIN_EMAIL.');
+            if (! DB::table('users')->where('is_admin', true)->where('active', true)->exists()) {
+                throw new RuntimeException('Cần ít nhất một Admin hệ thống đang hoạt động trước khi reset.');
             }
 
             $this->call(ResetHubLearningDataSeeder::class);
@@ -31,7 +26,7 @@ class ResetToAdminSeeder extends Seeder
                 DB::table($table)->delete();
             }
 
-            DB::table('users')->where('id', '!=', $admins->sole())->delete();
+            DB::table('users')->where('is_admin', false)->delete();
             DB::table('tenants')->delete();
         });
     }
