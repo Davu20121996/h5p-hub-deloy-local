@@ -29,9 +29,14 @@ class H5pController extends Controller
         return $content;
     }
 
-    public function play(LtiLaunch $launch, string $uuid): View
+    public function play(LtiLaunch $launch, string $uuid, ScoreService $scores): View
     {
         $content = $this->authorizeRead($launch, $uuid);
+        $submission = $launch->canReportResult($uuid) ? $scores->submission($launch) : null;
+        if ($submission !== null) {
+            return view('workspace.submitted', compact('launch', 'content', 'submission'));
+        }
+
         $runtime = new Runtime($launch);
         $filtered = $content->filtered ?? $runtime->filter($content);
         $content->refresh();
@@ -115,17 +120,18 @@ class H5pController extends Controller
     {
         abort_unless($launch->canReportResult($uuid), 403);
         $this->authorizeRead($launch, $uuid);
-        $result = $request->validate([
-            'timestamp' => 'required|date_format:Y-m-d\TH:i:s.v\Z',
-            'score' => 'nullable|required_with:maximum|numeric|min:0|lte:maximum',
-            'maximum' => 'nullable|required_with:score|numeric|gt:0|max:1000000000',
-        ]);
-        $timestamp = Carbon::parse($result['timestamp']);
-        abort_if($timestamp->lt($launch->created_at->copy()->subSeconds(5)) || $timestamp->gt(now()->addSeconds(5)), 422);
+        $result = null;
+        if ($scores->submission($launch) === null) {
+            $result = $request->validate([
+                'timestamp' => 'required|date_format:Y-m-d\TH:i:s.v\Z',
+                'score' => 'nullable|required_with:maximum|numeric|min:0|lte:maximum',
+                'maximum' => 'nullable|required_with:score|numeric|gt:0|max:1000000000',
+            ]);
+            $timestamp = Carbon::parse($result['timestamp']);
+            abort_if($timestamp->lt($launch->created_at->copy()->subSeconds(5)) || $timestamp->gt(now()->addSeconds(5)), 422);
+        }
 
-        $scores->send($launch, $result);
-
-        return response()->noContent();
+        return response()->noContent($scores->submit($launch, $result) ? 204 : 202);
     }
 
     public function files(LtiLaunch $launch, string $path = ''): BinaryFileResponse

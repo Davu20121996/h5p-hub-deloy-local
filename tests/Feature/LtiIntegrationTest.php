@@ -166,17 +166,18 @@ class LtiIntegrationTest extends TestCase
         app(KeyStore::class)->generate();
         Http::fake([
             $tokenUrl => Http::response(['access_token' => 'client-access-token']),
-            $lineItem.'/scores' => Http::response(status: 204),
+            $lineItem.'/scores' => Http::sequence()->pushStatus(502)->pushStatus(204),
         ]);
         $content = $this->content(changes: ['status' => 'published']);
-        $this->launch([
+        $claims = [
             'sub' => '42',
             Claims::PREFIX.'message_type' => 'LtiResourceLinkRequest',
             Claims::PREFIX.'roles' => [Claims::LEARNER],
             Claims::PREFIX.'resource_link' => ['id' => 'activity-20'],
             Claims::PREFIX.'custom' => ['content_id' => $content->uuid],
             ScoreService::ENDPOINT => ['scope' => [ScoreService::SCOPE], 'lineitem' => $lineItem],
-        ])->assertRedirect();
+        ];
+        $this->launch($claims)->assertRedirect();
         $launch = LtiLaunch::sole();
         $this->assertSame($lineItem, $launch->ags_lineitem_url);
 
@@ -185,10 +186,26 @@ class LtiIntegrationTest extends TestCase
             ->assertUnprocessable();
         $this->postJson(route('content.result', [$launch, Str::uuid()]), $result)->assertForbidden();
         $this->postJson(route('content.result', [$launch, $content->uuid]), $result + ['score' => 1, 'maximum' => 2, 'userId' => 'other-user'])
+            ->assertStatus(502);
+        $this->get(route('content.play', [$launch, $content->uuid]))->assertOk()
+            ->assertSee('data-h5p-submission="pending"', false)->assertDontSee('data-content-id', false);
+
+        $this->launch($claims)->assertRedirect();
+        $reopened = LtiLaunch::whereKeyNot($launch->id)->sole();
+        $retryUrl = route('content.result', [$reopened, $content->uuid]);
+        $this->postJson($retryUrl, $result + ['score' => 2, 'maximum' => 2])
             ->assertNoContent();
+        $this->postJson($retryUrl)->assertNoContent();
+        $this->get(route('content.play', [$reopened, $content->uuid]))->assertOk()
+            ->assertSee('Client đã nhận kết quả')->assertDontSee('data-content-id', false);
+        $this->assertDatabaseCount('lti_submissions', 1);
+        $this->assertDatabaseHas('lti_submissions', ['lti_identity_id' => $launch->lti_identity_id, 'pending_result' => null]);
 
         Http::assertSent(fn ($request) => $request->url() === $tokenUrl && $request['scope'] === ScoreService::SCOPE);
-        [$scoreRequest] = Http::recorded(fn ($request) => $request->url() === $lineItem.'/scores')->sole();
+        $scoreRequests = Http::recorded(fn ($request) => $request->url() === $lineItem.'/scores');
+        $this->assertCount(2, $scoreRequests);
+        [$scoreRequest] = $scoreRequests->last();
+        $this->assertSame($scoreRequests->first()[0]->body(), $scoreRequest->body());
         $this->assertTrue($scoreRequest->hasHeader('Authorization', 'Bearer client-access-token'));
         $this->assertTrue($scoreRequest->hasHeader('Content-Type', 'application/vnd.ims.lis.v1.score+json'));
         $score = json_decode($scoreRequest->body(), true, flags: JSON_THROW_ON_ERROR);

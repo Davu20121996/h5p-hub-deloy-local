@@ -3,7 +3,11 @@
 namespace App\Lti;
 
 use App\Models\LtiLaunch;
+use App\Models\LtiResourceLink;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 
@@ -21,8 +25,49 @@ class ScoreService
             && ! str_contains($url, '#') && parse_url($url, PHP_URL_QUERY) === null;
     }
 
-    /** @param array{timestamp: string, score?: float|int|null, maximum?: float|int|null} $result */
-    public function send(LtiLaunch $launch, array $result): void
+    public function submission(LtiLaunch $launch): ?object
+    {
+        return DB::table('lti_submissions')->where($this->submissionKey($launch))->first();
+    }
+
+    /** @param  array{timestamp: string, score?: float|int|null, maximum?: float|int|null}|null  $result */
+    public function submit(LtiLaunch $launch, ?array $result): bool
+    {
+        $key = $this->submissionKey($launch);
+        if ($result !== null) {
+            DB::table('lti_submissions')->insertOrIgnore($key + [
+                'pending_result' => Crypt::encryptString(json_encode($result, JSON_THROW_ON_ERROR)),
+            ]);
+        }
+
+        $lock = 'lti:score-delivery:'.$key['lti_resource_link_id'].':'.$key['lti_identity_id'];
+
+        return Cache::lock($lock, 30)->get(function () use ($key, $launch): bool {
+            $submission = DB::table('lti_submissions')->where($key);
+            $saved = $submission->first();
+            abort_unless($saved, 404);
+
+            if ($saved->delivered_at === null) {
+                $result = json_decode(Crypt::decryptString($saved->pending_result), true, flags: JSON_THROW_ON_ERROR);
+                $this->send($launch, $result);
+                $submission->update(['pending_result' => null, 'delivered_at' => now()]);
+            }
+
+            return true;
+        });
+    }
+
+    /** @return array{lti_resource_link_id: int, lti_identity_id: int} */
+    private function submissionKey(LtiLaunch $launch): array
+    {
+        $resource = LtiResourceLink::where('lti_deployment_id', $launch->lti_deployment_id)
+            ->where('resource_link_id', $launch->resource_link_id)->firstOrFail();
+
+        return ['lti_resource_link_id' => $resource->id, 'lti_identity_id' => $launch->lti_identity_id];
+    }
+
+    /** @param  array{timestamp: string, score?: float|int|null, maximum?: float|int|null}  $result */
+    private function send(LtiLaunch $launch, array $result): void
     {
         $platform = $launch->deployment->platform;
         $tokenUrl = $platform->ags_token_url;
