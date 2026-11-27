@@ -75,24 +75,37 @@
     @else
         <p class="muted">Đã thêm thủ công · Chưa truy cập từ LMS</p>
     @endif
-    @if($tenant->active && $matchingDeployments->isNotEmpty() && $member->local_role !== 'learner' && !ctype_digit($member->subject)
+    @if($member->local_role !== 'learner' && !ctype_digit($member->subject)
         && preg_match('/\A[a-zA-Z0-9][a-zA-Z0-9._-]{2,63}\z/', $member->subject))
-        <form class="hub-form" method="post" action="{{ route('admin.tenants.users.client-sync', [$tenant, $member->lti_identity_id]) }}">
-            @csrf
-            <label for="sync-deployment-{{ $member->lti_identity_id }}">Kết nối Client</label>
-            <select id="sync-deployment-{{ $member->lti_identity_id }}" name="deployment" required>
-                @foreach($matchingDeployments as $deployment)
-                    <option value="{{ $deployment->id }}">{{ $deployment->deployment_id }}</option>
-                @endforeach
-            </select>
-            <label for="sync-role-{{ $member->lti_identity_id }}">Vai trò trên Client</label>
-            <select id="sync-role-{{ $member->lti_identity_id }}" name="account_role" required>
-                <option value="">Chọn vai trò</option>
-                <option value="teacher" @selected($member->local_role === 'teacher')>Giáo viên</option>
-                <option value="tenant_admin" @selected($member->local_role === 'tenant-admin')>Tenant Admin</option>
-            </select>
-            <button class="hub-button">Đồng bộ tài khoản Client</button>
-        </form>
+        @if(!$tenant->active || $clientSyncSetupIssue || $matchingDeployments->isEmpty())
+            <button type="button" class="hub-button hub-button--secondary" disabled aria-describedby="sync-reason-{{ $member->lti_identity_id }}">Đồng bộ tài khoản Client</button>
+            <p id="sync-reason-{{ $member->lti_identity_id }}" class="muted">
+                @if(!$tenant->active)
+                    Mở lại đơn vị để đồng bộ tài khoản.
+                @elseif($clientSyncSetupIssue)
+                    {{ $clientSyncSetupIssue }}
+                @else
+                    Kiểm tra <a href="{{ route('admin.tenants.show', [$tenant, 'tab' => 'connections']) }}">kết nối LTI</a> đang hoạt động của người dùng. Issuer <code>{{ $member->platform_issuer }}</code> phải trùng với <code>LTI_MANAGED_CLIENT_URL</code>.
+                @endif
+            </p>
+        @else
+            <form class="hub-form" method="post" action="{{ route('admin.tenants.users.client-sync', [$tenant, $member->lti_identity_id]) }}">
+                @csrf
+                <label for="sync-deployment-{{ $member->lti_identity_id }}">Kết nối Client</label>
+                <select id="sync-deployment-{{ $member->lti_identity_id }}" name="deployment" required>
+                    @foreach($matchingDeployments as $deployment)
+                        <option value="{{ $deployment->id }}">{{ $deployment->deployment_id }}</option>
+                    @endforeach
+                </select>
+                <label for="sync-role-{{ $member->lti_identity_id }}">Vai trò trên Client</label>
+                <select id="sync-role-{{ $member->lti_identity_id }}" name="account_role" required>
+                    <option value="">Chọn vai trò</option>
+                    <option value="teacher" @selected($member->local_role === 'teacher')>Giáo viên</option>
+                    <option value="tenant_admin" @selected($member->local_role === 'tenant-admin')>Tenant Admin</option>
+                </select>
+                <button class="hub-button">Đồng bộ tài khoản Client</button>
+            </form>
+        @endif
     @endif
 @endif
 @if(($member->first_access_at === null && $member->local_role !== 'learner') || \App\Lti\Claims::canAuthorForPlatform(json_decode($member->roles, true) ?? [], $member->local_role, $member->platform_issuer))

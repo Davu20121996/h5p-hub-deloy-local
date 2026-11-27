@@ -316,8 +316,22 @@ class AdminTenantTest extends TestCase
             'tenant_id' => $tenant->id, 'lti_identity_id' => $canonicalTeacher->id, 'roles' => '[]', 'first_access_at' => now(),
         ]);
 
-        $this->get(route('admin.tenants.show', [$tenant, 'tab' => 'users']))
-            ->assertOk()->assertSee(route('admin.tenants.users.client-sync', [$tenant, $teacher]));
+        $usersPage = route('admin.tenants.show', [$tenant, 'tab' => 'users']);
+        $syncTeacher = route('admin.tenants.users.client-sync', [$tenant, $teacher]);
+        config(['lti.managed_client_url' => null]);
+        $this->get($usersPage)->assertOk()->assertSee('Đồng bộ tài khoản Client')
+            ->assertSee('Đặt LTI_MANAGED_CLIENT_URL trên HUB')->assertDontSee($syncTeacher);
+        $this->post($syncTeacher, ['deployment' => $deployment->id, 'account_role' => 'teacher'])
+            ->assertSessionHasErrors('deployment');
+
+        config(['lti.managed_client_url' => 'https://school.example.com', 'lti.provisioning_secret' => null]);
+        $this->get($usersPage)->assertOk()->assertSee('Đặt cùng HUB_PROVISIONING_SECRET')->assertDontSee($syncTeacher);
+
+        config(['lti.managed_client_url' => 'https://another-client.example.com', 'lti.provisioning_secret' => str_repeat('a', 32)]);
+        $this->get($usersPage)->assertOk()->assertSee('https://school.example.com')->assertDontSee($syncTeacher);
+
+        config(['lti.managed_client_url' => 'https://school.example.com']);
+        $this->get($usersPage)->assertOk()->assertSee($syncTeacher);
 
         $teacherResponse = $this->post(route('admin.tenants.users.client-sync', [$tenant, $teacher]), [
             'deployment' => $deployment->id, 'account_role' => 'teacher',

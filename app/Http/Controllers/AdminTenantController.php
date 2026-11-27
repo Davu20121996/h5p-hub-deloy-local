@@ -143,6 +143,18 @@ class AdminTenantController extends Controller
         ])->header('Cache-Control', 'no-store, private');
     }
 
+    private function clientProvisioningSetupIssue(?string $publicKey): ?string
+    {
+        $clientUrl = (string) config('lti.managed_client_url');
+
+        return match (true) {
+            ! Claims::isManagedClient($clientUrl) => 'Đặt LTI_MANAGED_CLIENT_URL trên HUB bằng Issuer HTTPS của Client.',
+            strlen((string) config('lti.provisioning_secret')) < 32 => 'Đặt cùng HUB_PROVISIONING_SECRET (ít nhất 32 ký tự) trên HUB và Client.',
+            ! $publicKey => 'Tạo khóa ký LTI trong trang quản trị HUB.',
+            default => null,
+        };
+    }
+
     /**
      * @param  array{manager_name: string, manager_email: ?string, manager_username?: string, account_role?: string}  $account
      * @return array{clientUrl: string, password: ?string, sessionKey: string, subject: ?string}
@@ -152,9 +164,11 @@ class AdminTenantController extends Controller
         $clientUrl = (string) config('lti.managed_client_url');
         $secret = (string) config('lti.provisioning_secret');
         $publicKey = $keys->publicKey();
-        if (! $deployment?->platform->active || ! Claims::isManagedClient($deployment->platform->issuer)
-            || ! $publicKey || strlen($secret) < 32) {
-            throw ValidationException::withMessages(['deployment' => 'Kiểm tra kết nối LTI của Client, khóa ký HUB và cấu hình cấp tài khoản.']);
+        if ($setupIssue = $this->clientProvisioningSetupIssue($publicKey)) {
+            throw ValidationException::withMessages(['deployment' => $setupIssue]);
+        }
+        if (! $deployment?->platform->active || ! Claims::isManagedClient($deployment->platform->issuer)) {
+            throw ValidationException::withMessages(['deployment' => 'Chọn kết nối LTI đang hoạt động có Issuer trùng với LTI_MANAGED_CLIENT_URL.']);
         }
 
         $role = $account['account_role'] ?? null;
@@ -185,9 +199,13 @@ class AdminTenantController extends Controller
 
         $passwordIssued = $result->json('password_issued');
         if (! $result->successful() || ! is_bool($passwordIssued)) {
-            $message = $result->conflict()
-                ? 'Client báo trùng tổ chức, email hoặc kết nối LTI. Hãy kiểm tra thông tin đã đăng ký.'
-                : 'Client chưa xác nhận cấp tài khoản. Hãy kiểm tra cấu hình kết nối.';
+            $message = match ($result->status()) {
+                401, 403 => 'Client từ chối kết nối. Kiểm tra HUB_PROVISIONING_SECRET trên cả hai stack.',
+                404 => 'Client chưa có chức năng đồng bộ này. Cập nhật bản vá và triển khai lại Client.',
+                409 => 'Client báo tài khoản, vai trò, tổ chức hoặc kết nối LTI bị trùng. Hãy kiểm tra thông tin đã đăng ký.',
+                503 => 'Kiểm tra HUB_BASE_URL và HUB_PROVISIONING_SECRET trên Client.',
+                default => 'Client chưa xác nhận cấp tài khoản. Hãy kiểm tra cấu hình kết nối.',
+            };
             throw ValidationException::withMessages(['deployment' => $message]);
         }
 
@@ -218,7 +236,7 @@ class AdminTenantController extends Controller
         ]);
     }
 
-    public function show(Request $request, Tenant $tenant): View
+    public function show(Request $request, Tenant $tenant, KeyStore $keys): View
     {
         $request->validate(['q' => 'nullable|string|max:255', 'role' => 'nullable|string|max:255', 'status' => 'nullable|in:draft,published,hidden', 'library' => 'nullable|integer', 'user' => 'nullable|integer', 'tab' => 'nullable|in:profile,connections,users,contents']);
         $deployments = LtiDeployment::with('platform')->where('tenant_id', $tenant->id)->get();
@@ -244,7 +262,10 @@ class AdminTenantController extends Controller
         });
         $roleOptions = DB::table('tenant_identity')->where('tenant_id', $tenant->id)->pluck('roles')->flatMap(fn ($roles) => json_decode($roles, true) ?? [])->unique()->sort();
 
-        return view('admin.tenant', compact('tenant', 'deployments', 'members', 'contents', 'authors', 'sizes', 'roleOptions') + ['libraries' => H5pLibrary::orderBy('machine_name')->get()]);
+        return view('admin.tenant', compact('tenant', 'deployments', 'members', 'contents', 'authors', 'sizes', 'roleOptions') + [
+            'libraries' => H5pLibrary::orderBy('machine_name')->get(),
+            'clientSyncSetupIssue' => $request->query('tab') === 'users' ? $this->clientProvisioningSetupIssue($keys->publicKey()) : null,
+        ]);
     }
 
     public function connection(Request $request, Tenant $tenant, ?LtiDeployment $deployment = null): RedirectResponse
