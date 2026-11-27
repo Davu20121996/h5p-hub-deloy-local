@@ -1,4 +1,5 @@
 const submissionStatus = document.querySelector('[data-h5p-submission]');
+const retryForm = document.querySelector('[data-h5p-retry]');
 const {h5pSubmission, resultUrl, playerUrl, csrfToken} = submissionStatus.dataset;
 const retryDelays = [2000, 5000, 15000, 30000];
 
@@ -13,6 +14,7 @@ async function deliverSubmission(result, attempt = 0) {
         });
         if (response.status === 204) {
             submissionStatus.textContent = 'Đã nộp bài. Client đã nhận kết quả.';
+            retryForm.hidden = false;
             return;
         }
         if ([401, 403, 404, 419, 422].includes(response.status)) {

@@ -58,6 +58,7 @@ Route::middleware('lti.launch')->prefix('workspace/{launch}')->group(function ()
     Route::patch('/content/{uuid}/status', [WorkspaceController::class, 'status'])->name('content.status');
     Route::get('/content/{uuid}/play', [H5pController::class, 'play'])->name('content.play');
     Route::post('/content/{uuid}/result', [H5pController::class, 'result'])->middleware('throttle:30,1')->name('content.result');
+    Route::post('/content/{uuid}/retry', [H5pController::class, 'retry'])->name('content.retry');
     Route::get('/content/{uuid}/export', [WorkspaceController::class, 'export'])->name('content.export');
     Route::post('/content/{uuid}/duplicate', [WorkspaceController::class, 'duplicate'])->name('content.duplicate');
     Route::delete('/content/{uuid}', [WorkspaceController::class, 'destroy'])->name('content.destroy');

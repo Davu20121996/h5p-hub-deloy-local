@@ -9,12 +9,13 @@ const script = fs.readFileSync(path.join(__dirname, '../../public/js/h5p-submiss
 test('the first completed event locks the player and retries exactly the same result', async () => {
     const status = {dataset: {h5pSubmission: 'ready', playerUrl: '/play', resultUrl: '/result'}};
     const player = {inert: false};
+    const retryForm = {hidden: true};
     const requests = [];
     const retries = [];
     let onXapi;
 
     vm.runInNewContext(script, {
-        document: {querySelector: selector => selector === '.h5p-content' ? player : status},
+        document: {querySelector: selector => ({'.h5p-content': player, '[data-h5p-retry]': retryForm, '[data-h5p-submission]': status})[selector]},
         H5P: {externalDispatcher: {on: (event, listener) => { onXapi = listener; }}},
         fetch: async (url, options) => {
             requests.push(options.body);
@@ -36,11 +37,13 @@ test('the first completed event locks the player and retries exactly the same re
     onXapi(completedEvent(10));
     await new Promise(setImmediate);
     assert.equal(player.inert, true);
+    assert.equal(retryForm.hidden, true);
     assert.equal(retries.length, 1);
     retries[0]();
     await new Promise(setImmediate);
     assert.equal(requests.length, 2);
     assert.equal(requests[1], requests[0]);
     assert.equal(JSON.parse(requests[1]).score, 4);
+    assert.equal(retryForm.hidden, false);
     assert.match(status.textContent, /Client đã nhận kết quả/);
 });

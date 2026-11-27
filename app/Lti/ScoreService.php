@@ -25,22 +25,30 @@ class ScoreService
             && ! str_contains($url, '#') && parse_url($url, PHP_URL_QUERY) === null;
     }
 
-    public function submission(LtiLaunch $launch): ?object
+    public function attemptId(LtiLaunch $launch, ?string $attemptId): string
     {
-        return DB::table('lti_submissions')->where($this->submissionKey($launch))->first();
+        return $attemptId ?? DB::table('lti_submissions')->where($this->submissionKey($launch))
+            ->where(fn ($query) => $query->where('attempt_id', $launch->id)->orWhereNull('delivered_at'))
+            ->orderByRaw('case when attempt_id = ? then 0 else 1 end', [$launch->id])
+            ->orderBy('attempt_id')->value('attempt_id') ?? $launch->id;
+    }
+
+    public function submission(LtiLaunch $launch, string $attemptId): ?object
+    {
+        return DB::table('lti_submissions')->where($this->submissionKey($launch) + ['attempt_id' => $attemptId])->first();
     }
 
     /** @param  array{timestamp: string, score?: float|int|null, maximum?: float|int|null}|null  $result */
-    public function submit(LtiLaunch $launch, ?array $result): bool
+    public function submit(LtiLaunch $launch, string $attemptId, ?array $result): bool
     {
-        $key = $this->submissionKey($launch);
+        $key = $this->submissionKey($launch) + ['attempt_id' => $attemptId];
         if ($result !== null) {
             DB::table('lti_submissions')->insertOrIgnore($key + [
                 'pending_result' => Crypt::encryptString(json_encode($result, JSON_THROW_ON_ERROR)),
             ]);
         }
 
-        $lock = 'lti:score-delivery:'.$key['lti_resource_link_id'].':'.$key['lti_identity_id'];
+        $lock = 'lti:score-delivery:'.$key['lti_resource_link_id'].':'.$key['lti_identity_id'].':'.$attemptId;
 
         return Cache::lock($lock, 30)->get(function () use ($key, $launch): bool {
             $submission = DB::table('lti_submissions')->where($key);

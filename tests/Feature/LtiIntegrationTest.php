@@ -166,9 +166,10 @@ class LtiIntegrationTest extends TestCase
         app(KeyStore::class)->generate();
         Http::fake([
             $tokenUrl => Http::response(['access_token' => 'client-access-token']),
-            $lineItem.'/scores' => Http::sequence()->pushStatus(502)->pushStatus(204),
+            $lineItem.'/scores' => Http::sequence()->pushStatus(502)->pushStatus(204)->pushStatus(204),
         ]);
         $content = $this->content(changes: ['status' => 'published']);
+        File::copyDirectory(resource_path('examples/demo-library'), Runtime::libraryPath().'/Hub.DemoQuestion-1.0');
         $claims = [
             'sub' => '42',
             Claims::PREFIX.'message_type' => 'LtiResourceLinkRequest',
@@ -192,19 +193,36 @@ class LtiIntegrationTest extends TestCase
 
         $this->launch($claims)->assertRedirect();
         $reopened = LtiLaunch::whereKeyNot($launch->id)->sole();
-        $retryUrl = route('content.result', [$reopened, $content->uuid]);
+        $this->get(route('content.play', [$reopened, $content->uuid]))->assertOk()
+            ->assertViewHas('attemptId', $launch->id);
+        $retryUrl = route('content.result', [$reopened, $content->uuid, 'attempt' => $launch->id]);
         $this->postJson($retryUrl, $result + ['score' => 2, 'maximum' => 2])
             ->assertNoContent();
         $this->postJson($retryUrl)->assertNoContent();
-        $this->get(route('content.play', [$reopened, $content->uuid]))->assertOk()
-            ->assertSee('Client đã nhận kết quả')->assertDontSee('data-content-id', false);
+        $this->get(route('content.play', [$reopened, $content->uuid, 'attempt' => $launch->id]))->assertOk()
+            ->assertSee('Client đã nhận kết quả')->assertSee('Làm lại bài')->assertDontSee('data-content-id', false);
         $this->assertDatabaseCount('lti_submissions', 1);
         $this->assertDatabaseHas('lti_submissions', ['lti_identity_id' => $launch->lti_identity_id, 'pending_result' => null]);
 
+        $restart = $this->post(route('content.retry', [$reopened, $content->uuid]), ['attempt' => $launch->id]);
+        $restart->assertStatus(303);
+        $newPlayerUrl = $restart->headers->get('Location');
+        parse_str(parse_url($newPlayerUrl, PHP_URL_QUERY), $query);
+        $this->assertTrue(Str::isUuid($query['attempt']));
+        $this->assertNotSame($launch->id, $query['attempt']);
+        $this->get($newPlayerUrl)->assertOk()->assertSee('data-h5p-submission="ready"', false)->assertSee('data-content-id', false);
+        $newResultUrl = route('content.result', [$reopened, $content->uuid, 'attempt' => $query['attempt']]);
+        $this->postJson($newResultUrl, [
+            'timestamp' => now()->addSecond()->utc()->format('Y-m-d\TH:i:s.v\Z'),
+            'score' => 2, 'maximum' => 2,
+        ])->assertNoContent();
+        $this->postJson($newResultUrl)->assertNoContent();
+        $this->assertDatabaseCount('lti_submissions', 2);
+
         Http::assertSent(fn ($request) => $request->url() === $tokenUrl && $request['scope'] === ScoreService::SCOPE);
         $scoreRequests = Http::recorded(fn ($request) => $request->url() === $lineItem.'/scores');
-        $this->assertCount(2, $scoreRequests);
-        [$scoreRequest] = $scoreRequests->last();
+        $this->assertCount(3, $scoreRequests);
+        [$scoreRequest] = $scoreRequests->values()[1];
         $this->assertSame($scoreRequests->first()[0]->body(), $scoreRequest->body());
         $this->assertTrue($scoreRequest->hasHeader('Authorization', 'Bearer client-access-token'));
         $this->assertTrue($scoreRequest->hasHeader('Content-Type', 'application/vnd.ims.lis.v1.score+json'));
@@ -212,6 +230,10 @@ class LtiIntegrationTest extends TestCase
         $this->assertSame('42', $score['userId']);
         $this->assertEquals(1, $score['scoreGiven']);
         $this->assertSame('FullyGraded', $score['gradingProgress']);
+        $newScore = json_decode($scoreRequests->last()[0]->body(), true, flags: JSON_THROW_ON_ERROR);
+        $this->assertSame('42', $newScore['userId']);
+        $this->assertEquals(2, $newScore['scoreGiven']);
+        $this->assertNotSame($score['timestamp'], $newScore['timestamp']);
     }
 
     public function test_local_permissions_survive_lms_login_and_revocation_applies_to_existing_sessions(): void

@@ -7,6 +7,7 @@ use App\Lti\ScoreService;
 use App\Models\H5pContent;
 use App\Models\LtiLaunch;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Carbon;
@@ -29,12 +30,16 @@ class H5pController extends Controller
         return $content;
     }
 
-    public function play(LtiLaunch $launch, string $uuid, ScoreService $scores): View
+    public function play(Request $request, LtiLaunch $launch, string $uuid, ScoreService $scores): View
     {
         $content = $this->authorizeRead($launch, $uuid);
-        $submission = $launch->canReportResult($uuid) ? $scores->submission($launch) : null;
-        if ($submission !== null) {
-            return view('workspace.submitted', compact('launch', 'content', 'submission'));
+        $attemptId = null;
+        if ($launch->canReportResult($uuid)) {
+            $attemptId = $scores->attemptId($launch, $request->validate(['attempt' => 'sometimes|required|uuid'])['attempt'] ?? null);
+            $submission = $scores->submission($launch, $attemptId);
+            if ($submission !== null) {
+                return view('workspace.submitted', compact('launch', 'content', 'submission', 'attemptId'));
+            }
         }
 
         $runtime = new Runtime($launch);
@@ -63,7 +68,7 @@ class H5pController extends Controller
             ]],
         ];
 
-        return view('workspace.player', compact('launch', 'content', 'integration', 'coreScripts', 'coreStyles', 'scripts', 'styles'));
+        return view('workspace.player', compact('launch', 'content', 'integration', 'coreScripts', 'coreStyles', 'scripts', 'styles', 'attemptId'));
     }
 
     public function ajax(Request $request, LtiLaunch $launch, string $action = ''): JsonResponse
@@ -120,8 +125,9 @@ class H5pController extends Controller
     {
         abort_unless($launch->canReportResult($uuid), 403);
         $this->authorizeRead($launch, $uuid);
+        $attemptId = $scores->attemptId($launch, $request->validate(['attempt' => 'sometimes|required|uuid'])['attempt'] ?? null);
         $result = null;
-        if ($scores->submission($launch) === null) {
+        if ($scores->submission($launch, $attemptId) === null) {
             $result = $request->validate([
                 'timestamp' => 'required|date_format:Y-m-d\TH:i:s.v\Z',
                 'score' => 'nullable|required_with:maximum|numeric|min:0|lte:maximum',
@@ -131,7 +137,17 @@ class H5pController extends Controller
             abort_if($timestamp->lt($launch->created_at->copy()->subSeconds(5)) || $timestamp->gt(now()->addSeconds(5)), 422);
         }
 
-        return response()->noContent($scores->submit($launch, $result) ? 204 : 202);
+        return response()->noContent($scores->submit($launch, $attemptId, $result) ? 204 : 202);
+    }
+
+    public function retry(Request $request, LtiLaunch $launch, string $uuid, ScoreService $scores): RedirectResponse
+    {
+        abort_unless($launch->canReportResult($uuid), 403);
+        $this->authorizeRead($launch, $uuid);
+        $attemptId = $request->validate(['attempt' => 'required|uuid'])['attempt'];
+        abort_unless($scores->submission($launch, $attemptId)?->delivered_at !== null, 409);
+
+        return redirect()->route('content.play', [$launch, $uuid, 'attempt' => (string) Str::uuid()], 303);
     }
 
     public function files(LtiLaunch $launch, string $path = ''): BinaryFileResponse
