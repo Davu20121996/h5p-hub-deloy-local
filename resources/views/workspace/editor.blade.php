@@ -1,6 +1,7 @@
 @extends('workspace.layout')
 @section('title', 'Soạn bài H5P')
-@section('head')@foreach($styles as $style)<link rel="stylesheet" href="{{ $style }}">@endforeach @endsection
+@section('page-class', 'hub-editor-page')
+@section('head')@foreach($coreStyles as $style)<link rel="stylesheet" href="{{ $style }}">@endforeach @endsection
 @section('body')
 <div class="row">
     <h1>{{ $content ? 'Sửa bài H5P' : 'Tạo bài H5P' }}</h1>

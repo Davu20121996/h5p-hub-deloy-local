@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="{{ asset('hub-forms.css') }}?v={{ filemtime(public_path('hub-forms.css')) }}">
     @yield('head')
 </head>
-<body class="hub-page">
+<body class="hub-page @yield('page-class')">
 <header class="hub-header">
     <strong>H5P Hub · {{ $launch->deployment->tenant->name }}</strong>
     <span>{{ $launch->identity->name ?? $launch->identity->subject }} · {{ $launch->canManageTenant() ? 'Tenant-admin' : ($launch->can_author ? 'Giảng viên' : 'Học viên') }}</span>

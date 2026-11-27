@@ -30,6 +30,9 @@
 }
 .hub-header a { color: white; font-weight: 700; text-decoration: none; }
 .hub-main { width: min(100%, 1160px); box-sizing: border-box; margin: 26px auto; padding: 0 20px; }
+.hub-editor-page { --hub-editor-gutter: clamp(12px, 2vw, 28px); }
+.hub-editor-page .hub-header { padding-inline: var(--hub-editor-gutter); }
+.hub-editor-page .hub-main { width: 100%; padding-inline: var(--hub-editor-gutter); }
 .hub-main h1 { margin: 0 0 12px; font-size: clamp(1.5rem, 3vw, 2rem); line-height: 1.2; }
 .hub-main h2 { margin: 0 0 12px; font-size: 1.2rem; }
 .hub-main h3 { margin: 20px 0 8px; font-size: 1.05rem; }

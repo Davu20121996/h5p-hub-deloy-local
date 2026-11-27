@@ -1,0 +1,8 @@
+html,
+body {
+    max-width: none;
+}
+
+.h5peditor-form.h5peditor-form-manager > :is(.tree, .common, .field) {
+    max-width: none;
+}

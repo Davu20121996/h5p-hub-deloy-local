@@ -46,7 +46,10 @@ class WorkspaceController extends Controller
         $asset = fn ($type, $path) => route('h5p.assets', ['kind' => $type, 'path' => $path]);
         $coreScripts = array_map(fn ($path) => $asset('core', $path), \H5PCore::$scripts);
         $scripts = array_merge($coreScripts, array_map(fn ($path) => $asset('editor', $path), \H5peditor::$scripts), [$asset('editor', 'language/en.js'), $asset('editor', 'scripts/h5peditor-init.js')]);
-        $styles = array_merge(array_map(fn ($path) => $asset('core', $path), \H5PCore::$styles), array_map(fn ($path) => $asset('editor', $path), \H5peditor::$styles));
+        $coreStyles = array_map(fn ($path) => $asset('core', $path), \H5PCore::$styles);
+        $editorStyles = array_merge($coreStyles, array_map(fn ($path) => $asset('editor', $path), \H5peditor::$styles), [
+            asset('h5p-editor-frame.css').'?v='.filemtime(public_path('h5p-editor-frame.css')),
+        ]);
         $integration = [
             'baseUrl' => url('/'), 'url' => route('h5p.files.base', ['launch' => $launch->id]),
             'libraryUrl' => $asset('core', ''), 'postUserStatistics' => false, 'saveFreq' => false,
@@ -59,7 +62,7 @@ class WorkspaceController extends Controller
                 'nodeVersionId' => $content?->id,
                 'apiVersion' => \H5PCore::$coreApi, 'language' => 'en', 'enableContentHub' => false,
                 'copyrightSemantics' => $validator->getCopyrightSemantics(), 'metadataSemantics' => $validator->getMetadataSemantics(),
-                'assets' => ['js' => $scripts, 'css' => $styles],
+                'assets' => ['js' => $scripts, 'css' => $editorStyles],
             ],
         ];
         $libraryString = $content ? \H5PCore::libraryToString($content->library->definition()) : '';
@@ -71,7 +74,7 @@ class WorkspaceController extends Controller
             $parameters = $previousParameters;
         }
 
-        return view('workspace.editor', compact('launch', 'content', 'integration', 'scripts', 'styles', 'libraryString', 'parameters'));
+        return view('workspace.editor', compact('launch', 'content', 'integration', 'scripts', 'coreStyles', 'libraryString', 'parameters'));
     }
 
     public function save(Request $request, LtiLaunch $launch, ?string $uuid = null): RedirectResponse
