@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\H5p\Runtime;
 use App\Models\H5pContent;
+use App\Models\H5pLibrary;
 use App\Models\LtiLaunch;
 use App\Models\LtiResourceLink;
 use Illuminate\Http\RedirectResponse;
@@ -30,15 +31,15 @@ class WorkspaceController extends Controller
         return view('workspace.index', compact('launch', 'contents'));
     }
 
-    public function edit(LtiLaunch $launch, ?string $uuid = null): View
+    public function edit(Request $request, LtiLaunch $launch, ?string $uuid = null): View
     {
         abort_unless($launch->can_author, 403);
-        if ($uuid === null) {
-            return view('workspace.import', compact('launch'));
-        }
-        $content = $launch->content($uuid);
+        $content = $uuid === null ? null : $launch->content($uuid);
         if ($content) {
             $launch->authorizeEdit($content);
+        }
+        if ($content === null && ! H5pLibrary::where('runnable', true)->exists()) {
+            return view('workspace.editor-unavailable', compact('launch'));
         }
         $runtime = new Runtime($launch);
         $validator = new \H5PContentValidator($runtime->framework, $runtime->core);
@@ -62,7 +63,13 @@ class WorkspaceController extends Controller
             ],
         ];
         $libraryString = $content ? \H5PCore::libraryToString($content->library->definition()) : '';
-        $parameters = json_encode(['params' => $content?->parameters ?? new \stdClass, 'metadata' => array_merge($content?->metadata ?? [], ['title' => $content?->title ?? ''])]);
+        $parameters = json_encode(['params' => $content ? (object) $content->parameters : new \stdClass, 'metadata' => array_merge($content?->metadata ?? [], ['title' => $content?->title ?? ''])]);
+        $previousLibrary = $request->old('library');
+        $previousParameters = $request->old('parameters');
+        if (is_string($previousLibrary) && is_string($previousParameters) && preg_match('/\A[A-Za-z0-9_.-]+ [0-9]+\.[0-9]+\z/', $previousLibrary)) {
+            $libraryString = $previousLibrary;
+            $parameters = $previousParameters;
+        }
 
         return view('workspace.editor', compact('launch', 'content', 'integration', 'scripts', 'styles', 'libraryString', 'parameters'));
     }
@@ -72,7 +79,7 @@ class WorkspaceController extends Controller
         abort_unless($launch->can_author, 403);
         $input = $request->validate([
             'title' => $this->plainTextRules(), 'library' => 'required|string|max:255',
-            'parameters' => 'required|json|max:5120', 'status' => 'required|in:draft,published',
+            'parameters' => 'required|string|max:2097152|json', 'status' => 'required|in:draft,published',
         ]);
         try {
             $data = json_decode($input['parameters'], true, 128, JSON_THROW_ON_ERROR);

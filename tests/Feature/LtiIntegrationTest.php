@@ -436,13 +436,39 @@ class LtiIntegrationTest extends TestCase
     public function test_editor_player_and_semantics_endpoints_render(): void
     {
         $launch = $this->activeLaunch();
+        $this->get(route('content.create', $launch))->assertOk()->assertSee('HUB chưa có loại bài H5P để soạn');
         $library = H5pLibrary::factory()->create();
         File::copyDirectory(resource_path('examples/demo-library'), Runtime::libraryPath().'/Hub.DemoQuestion-1.0');
-        $this->get(route('content.create', ['launch' => $launch->id]))->assertOk()->assertSee('Nhập bài .h5p')->assertDontSee('h5p-editor');
+        $this->get(route('workspace.index', $launch))->assertOk()->assertSee('Tạo bài H5P')->assertSee('Nhập bài .h5p');
+        $this->get(route('content.create', $launch))->assertOk()->assertSee('Tạo bài H5P')->assertSee('h5p-editor');
         $this->getJson(route('h5p.ajax', ['launch' => $launch->id, 'action' => 'libraries']))->assertOk()->assertJsonPath('0.name', 'Hub.DemoQuestion');
         $this->getJson(route('h5p.ajax', ['launch' => $launch->id, 'action' => 'libraries', 'machineName' => 'Hub.DemoQuestion', 'majorVersion' => 1, 'minorVersion' => 0]))->assertOk()->assertJsonPath('name', 'Hub.DemoQuestion');
-        $content = $this->content($launch, ['h5p_library_id' => $library->id]);
-        $this->get(route('content.play', ['launch' => $launch->id, 'uuid' => $content->uuid]))->assertOk()->assertSee('h5p-content', false);
+        $form = [
+            'title' => 'Bài giảng mới', 'library' => 'Hub.DemoQuestion 1.0', 'status' => 'draft',
+            'parameters' => json_encode(['params' => ['question' => 'Nội dung câu hỏi?', 'answer' => true], 'metadata' => ['license' => 'U']]),
+        ];
+        $created = $this->post(route('content.store', $launch), $form)->assertRedirect();
+        $content = H5pContent::sole();
+        $this->assertSame($library->id, $content->h5p_library_id);
+        $editUrl = route('content.edit', [$launch, $content->uuid]);
+        $created->assertRedirect($editUrl);
+        $this->get($editUrl)->assertOk()->assertSee('Sửa bài H5P')->assertDontSee('Gắn bài đã lưu vào khóa học');
+        $this->post(route('content.update', [$launch, $content->uuid]), array_replace($form, [
+            'title' => 'Bài giảng đã sửa', 'status' => 'published',
+            'parameters' => json_encode(['params' => ['question' => 'Câu hỏi đã sửa?', 'answer' => true], 'metadata' => ['license' => 'U']]),
+        ]))->assertRedirect($editUrl);
+        $this->assertSame('Bài giảng đã sửa', $content->fresh()->title);
+        $this->assertSame('Câu hỏi đã sửa?', $content->fresh()->parameters['question']);
+        $this->get($editUrl)->assertOk()->assertSee('Gắn bài đã lưu vào khóa học');
+        $this->get(route('content.play', [$launch, $content->uuid]))->assertOk()->assertSee('h5p-content', false)->assertSee($editUrl);
+
+        $resource = $this->launch([
+            Claims::PREFIX.'message_type' => 'LtiResourceLinkRequest',
+            Claims::PREFIX.'resource_link' => ['id' => 'editor-lesson'],
+            Claims::PREFIX.'custom' => ['content_id' => $content->uuid],
+        ])->assertRedirect();
+        $resourceLaunch = LtiLaunch::where('message_type', 'LtiResourceLinkRequest')->sole();
+        $resource->assertRedirect(route('content.play', [$resourceLaunch, $content->uuid]));
     }
 
     public function test_trainer_can_save_filtered_content_and_export_import_package(): void

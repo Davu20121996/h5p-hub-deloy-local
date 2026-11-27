@@ -61,6 +61,10 @@ class LtiController extends Controller
         $request->session()->regenerate();
         $request->session()->put('lti_launches.'.$launch->id, true);
 
+        if ($launch->can_author && $launch->message_type === 'LtiResourceLinkRequest') {
+            return redirect()->route('content.play', [$launch, $launch->content_uuid], 303);
+        }
+
         return redirect()->route('workspace.index', ['launch' => $launch->id], 303);
     }
 
